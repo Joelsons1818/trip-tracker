@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getGoogleSheets } from '@/lib/sheets';
 import { Transaction } from '@/types';
 
+export const dynamic = 'force-dynamic';
+
 async function getFirstSheetName(sheets: any, sheetId: string) {
     const response = await sheets.spreadsheets.get({
         spreadsheetId: sheetId,
