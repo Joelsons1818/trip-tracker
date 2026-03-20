@@ -340,6 +340,7 @@ export default function Home() {
                   <input
                     type="number"
                     step="0.01"
+                    inputMode="decimal"
                     required
                     value={amountUSD}
                     onChange={e => setAmountUSD(e.target.value)}
@@ -357,6 +358,7 @@ export default function Home() {
                     <input
                       type="number"
                       step="0.01"
+                      inputMode="decimal"
                       required
                       value={costBRL}
                       onChange={e => setCostBRL(e.target.value)}
