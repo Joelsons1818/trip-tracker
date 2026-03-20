@@ -6,7 +6,7 @@ async function getFirstSheetName(sheets: any, sheetId: string) {
     const response = await sheets.spreadsheets.get({
         spreadsheetId: sheetId,
     });
-    return response.data.sheets[0].properties.title;
+    return response.data.sheets?.[0]?.properties?.title || 'Página1';
 }
 
 export async function GET() {
@@ -39,7 +39,7 @@ export async function GET() {
             amountUSD: parseFloat(row[4] || '0'),
             costBRL: row[5] ? parseFloat(row[5]) : undefined,
             description: row[6] || undefined,
-            rowIndex: index + 1, // 0-indexed values array + 2 for Headers offset = sheet index.. wait. Sheets are 0-indexed in batchUpdate, but in A1 notation 1-indexed. Let's use 0-indexed for batchUpdate. The header is row 0. Data starts at row 1. So `index + 1` is the 0-indexed row number in the sheet.
+            rowIndex: index + 1,
         }));
 
         return NextResponse.json({ transactions: transactions.reverse() });
@@ -105,13 +105,11 @@ export async function DELETE(request: Request) {
             return NextResponse.json({ error: 'Missing GOOGLE_SHEET_ID' }, { status: 500 });
         }
 
-        // To delete a row, we need the sheetId of the specific sheet, not the spreadsheetId
-        // Let's get the metadata of the first sheet to get its sheetId
         const response = await sheets.spreadsheets.get({
             spreadsheetId: sheetId,
         });
 
-        const firstSheetId = response.data.sheets[0].properties.sheetId;
+        const firstSheetId = response.data.sheets?.[0]?.properties?.sheetId || 0;
 
         await sheets.spreadsheets.batchUpdate({
             spreadsheetId: sheetId,
@@ -122,8 +120,8 @@ export async function DELETE(request: Request) {
                             range: {
                                 sheetId: firstSheetId,
                                 dimension: 'ROWS',
-                                startIndex: rowIndex,     // Inclusive
-                                endIndex: rowIndex + 1,   // Exclusive
+                                startIndex: rowIndex,
+                                endIndex: rowIndex + 1,
                             }
                         }
                     }
