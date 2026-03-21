@@ -4,11 +4,31 @@ import { useState, useEffect } from 'react';
 import { Transaction } from '@/types';
 import { PlusCircle, MinusCircle, Wallet, ArrowUpRight, ArrowDownRight, RefreshCw, HandCoins, Trash2, BarChart2, X, Calendar, ChevronDown } from 'lucide-react';
 
+const parseInputNumber = (val: string) => {
+    if (!val) return 0;
+    const str = val.trim();
+    if (str.includes(',') && str.includes('.')) {
+         const lastDot = str.lastIndexOf('.');
+         const lastComma = str.lastIndexOf(',');
+         return lastComma > lastDot 
+            ? parseFloat(str.replace(/\./g, '').replace(',', '.'))
+            : parseFloat(str.replace(/,/g, ''));
+    } else if (str.includes(',')) {
+         return parseFloat(str.replace(',', '.'));
+    } else {
+         return parseFloat(str);
+    }
+};
+
+const formatCurrency = (val: number) => {
+  return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
 const generateMonthOptions = () => {
   const options = [];
   const today = new Date();
-  let d = new Date(today.getFullYear(), today.getMonth() - 2, 1);
-  for (let i = 0; i < 24; i++) {
+  let d = new Date(today.getFullYear(), today.getMonth() - 12, 1);
+  for (let i = 0; i < 36; i++) {
     const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     const label = d.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
     options.push({ value, label: label.charAt(0).toUpperCase() + label.slice(1).replace('.', '') });
@@ -69,8 +89,8 @@ export default function Home() {
       date: new Date().toISOString(),
       type: 'Deposit',
       person,
-      amountUSD: parseFloat(amountUSD),
-      costBRL: parseFloat(costBRL)
+      amountUSD: parseInputNumber(amountUSD),
+      costBRL: parseInputNumber(costBRL)
     };
 
     setAmountUSD('');
@@ -97,7 +117,7 @@ export default function Home() {
       date: new Date().toISOString(),
       type: 'Expense',
       person,
-      amountUSD: parseFloat(amountUSD),
+      amountUSD: parseInputNumber(amountUSD),
       description
     };
 
@@ -192,17 +212,17 @@ export default function Home() {
           <div className="bg-white/10 backdrop-blur-md rounded-2xl p-5 border border-white/20 shadow-lg relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-cyan-400"></div>
             <p className="text-gray-300 text-sm font-medium mb-1">Saldo Disponível (USD)</p>
-            <p className="text-4xl font-extrabold tracking-tight">${balance.toFixed(2)}</p>
+            <p className="text-4xl font-extrabold tracking-tight">${formatCurrency(balance)}</p>
 
             <div className="flex gap-4 mt-5 pt-4 border-t border-white/10">
               <div className="flex-1">
                 <p className="text-xs text-emerald-300 font-medium flex items-center gap-1 mb-1"><ArrowDownRight className="w-3 h-3" /> Entradas</p>
-                <p className="font-semibold">${totalDeposits.toFixed(2)}</p>
+                <p className="font-semibold">${formatCurrency(totalDeposits)}</p>
               </div>
               <div className="w-px bg-white/10"></div>
               <div className="flex-1">
                 <p className="text-xs text-rose-300 font-medium flex items-center gap-1 mb-1"><ArrowUpRight className="w-3 h-3" /> Gastos</p>
-                <p className="font-semibold">${totalExpenses.toFixed(2)}</p>
+                <p className="font-semibold">${formatCurrency(totalExpenses)}</p>
               </div>
             </div>
           </div>
@@ -280,10 +300,10 @@ export default function Home() {
                     <div className="flex items-center gap-3 shrink-0">
                       <div className="text-right">
                         <p className={`font-black text-[17px] ${isDeposit ? 'text-emerald-500' : 'text-rose-600'}`}>
-                          {isDeposit ? '+' : '-'}${tx.amountUSD.toFixed(2)}
+                          {isDeposit ? '+' : '-'}${formatCurrency(tx.amountUSD)}
                         </p>
                         {isDeposit && tx.costBRL && (
-                          <p className="text-[11px] text-gray-400 font-semibold">R$ {tx.costBRL.toFixed(2)}</p>
+                          <p className="text-[11px] text-gray-400 font-semibold">R$ {formatCurrency(tx.costBRL)}</p>
                         )}
                       </div>
                       <button
@@ -338,8 +358,7 @@ export default function Home() {
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
                     inputMode="decimal"
                     required
                     value={amountUSD}
@@ -356,8 +375,7 @@ export default function Home() {
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">R$</span>
                     <input
-                      type="number"
-                      step="0.01"
+                      type="text"
                       inputMode="decimal"
                       required
                       value={costBRL}
@@ -426,11 +444,11 @@ export default function Home() {
               <div className="grid grid-cols-2 gap-3 pb-4 border-b border-gray-100">
                 <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
                   <p className="text-xs text-slate-500 font-bold mb-1 uppercase tracking-wide">Hoje</p>
-                  <p className="text-2xl font-black text-slate-800">${spendToday.toFixed(2)}</p>
+                  <p className="text-2xl font-black text-slate-800">${formatCurrency(spendToday)}</p>
                 </div>
                 <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
                   <p className="text-xs text-slate-500 font-bold mb-1 uppercase tracking-wide">Esta Semana</p>
-                  <p className="text-2xl font-black text-slate-800">${spendThisWeek.toFixed(2)}</p>
+                  <p className="text-2xl font-black text-slate-800">${formatCurrency(spendThisWeek)}</p>
                 </div>
               </div>
 
@@ -451,17 +469,17 @@ export default function Home() {
                 </div>
 
                 <p className="text-sm text-cyan-700 font-bold mb-1 uppercase tracking-wide relative z-0">Este Mês</p>
-                <p className="text-4xl font-black text-cyan-900 mb-2 relative z-0">${spendSelectedMonth.toFixed(2)}</p>
+                <p className="text-4xl font-black text-cyan-900 mb-2 relative z-0">${formatCurrency(spendSelectedMonth)}</p>
               </div>
 
               <div className="grid grid-cols-2 gap-3 pt-2">
                 <div>
                   <p className="text-[11px] text-gray-400 font-bold mb-1 uppercase tracking-wide">Média Diária (Anual)</p>
-                  <p className="text-lg font-bold text-gray-700">${dailyAverage.toFixed(2)}</p>
+                  <p className="text-lg font-bold text-gray-700">${formatCurrency(dailyAverage)}</p>
                 </div>
                 <div>
                   <p className="text-[11px] text-gray-400 font-bold mb-1 uppercase tracking-wide">Média Mensal</p>
-                  <p className="text-lg font-bold text-gray-700">${monthlyAverage.toFixed(2)}</p>
+                  <p className="text-lg font-bold text-gray-700">${formatCurrency(monthlyAverage)}</p>
                 </div>
               </div>
 

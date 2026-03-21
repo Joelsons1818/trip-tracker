@@ -11,6 +11,52 @@ async function getFirstSheetName(sheets: any, sheetId: string) {
     return response.data.sheets?.[0]?.properties?.title || 'Página1';
 }
 
+const parseNumber = (val: string | number | undefined | null) => {
+    if (val === undefined || val === null || val === '') return 0;
+    if (typeof val === 'number') return val;
+    const str = val.toString().trim();
+    if (str.includes(',') && str.includes('.')) {
+         const lastDot = str.lastIndexOf('.');
+         const lastComma = str.lastIndexOf(',');
+         if (lastComma > lastDot) {
+             return parseFloat(str.replace(/\./g, '').replace(',', '.'));
+         } else {
+             return parseFloat(str.replace(/,/g, ''));
+         }
+    } else if (str.includes(',')) {
+         return parseFloat(str.replace(',', '.'));
+    } else {
+         return parseFloat(str);
+    }
+};
+
+const parseDate = (val: string | number) => {
+    if (!val) return new Date().toISOString();
+    if (typeof val === 'number') {
+        return new Date(Math.round((val - 25569) * 86400 * 1000)).toISOString();
+    }
+    const str = val.toString();
+    if (str.includes('T') || str.match(/^\d{4}-\d{2}-\d{2}/)) {
+        const d = new Date(str);
+        if (!isNaN(d.getTime())) return d.toISOString();
+    }
+    const parts = str.split(/[\s/:]+/);
+    if (parts.length >= 3) {
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const year = parseInt(parts[2], 10);
+        let h = 0, m = 0, s = 0;
+        if (parts[3]) h = parseInt(parts[3], 10);
+        if (parts[4]) m = parseInt(parts[4], 10);
+        if (parts[5]) s = parseInt(parts[5], 10);
+        const d = new Date(year, month, day, h, m, s);
+        if (!isNaN(d.getTime())) return d.toISOString();
+    }
+    const fallback = new Date(str);
+    if (!isNaN(fallback.getTime())) return fallback.toISOString();
+    return new Date().toISOString();
+};
+
 export async function GET() {
     try {
         const sheets = await getGoogleSheets();
@@ -35,11 +81,11 @@ export async function GET() {
 
         const transactions: Transaction[] = rows.map((row: any[], index: number) => ({
             id: row[0],
-            date: row[1],
+            date: parseDate(row[1]),
             type: row[2] as 'Deposit' | 'Expense',
             person: row[3] as 'Daniel' | 'Marília',
-            amountUSD: parseFloat(row[4] || '0'),
-            costBRL: row[5] ? parseFloat(row[5]) : undefined,
+            amountUSD: parseNumber(row[4]),
+            costBRL: row[5] ? parseNumber(row[5]) : undefined,
             description: row[6] || undefined,
             rowIndex: index + 1,
         }));
