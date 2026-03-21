@@ -47,8 +47,9 @@ export default function Home() {
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
 
-  // Form State
-  const [person, setPerson] = useState<'Daniel' | 'Marília'>('Daniel');
+  // New Wise State
+  const [selectedWise, setSelectedWise] = useState<'Daniel' | 'Marília' | null>(null);
+  const [historyFilter, setHistoryFilter] = useState<'Total' | 'Daniel' | 'Marília'>('Total');
   const [amountUSD, setAmountUSD] = useState('');
   const [costBRL, setCostBRL] = useState('');
   const [description, setDescription] = useState('');
@@ -88,7 +89,7 @@ export default function Home() {
       id: crypto.randomUUID(),
       date: new Date().toISOString(),
       type: 'Deposit',
-      person,
+      person: selectedWise || 'Daniel',
       amountUSD: parseInputNumber(amountUSD),
       costBRL: parseInputNumber(costBRL)
     };
@@ -116,7 +117,7 @@ export default function Home() {
       id: crypto.randomUUID(),
       date: new Date().toISOString(),
       type: 'Expense',
-      person,
+      person: selectedWise || 'Daniel',
       amountUSD: parseInputNumber(amountUSD),
       description
     };
@@ -158,8 +159,22 @@ export default function Home() {
   const totalExpenses = transactions.filter(t => t.type === 'Expense').reduce((acc, t) => acc + t.amountUSD, 0);
   const balance = totalDeposits - totalExpenses;
 
+  const getPersonBalance = (p: 'Daniel'|'Marília') => {
+    const deps = transactions.filter(t => t.type === 'Deposit' && t.person === p).reduce((acc, t) => acc + t.amountUSD, 0);
+    const exps = transactions.filter(t => t.type === 'Expense' && t.person === p).reduce((acc, t) => acc + t.amountUSD, 0);
+    return deps - exps;
+  };
+  const danielBalance = getPersonBalance('Daniel');
+  const mariliaBalance = getPersonBalance('Marília');
+
+  const filteredTransactions = historyFilter === 'Total' 
+    ? transactions 
+    : transactions.filter(t => t.person === historyFilter);
+
   // --- Analytics Calculations ---
-  const expenses = transactions.filter(t => t.type === 'Expense');
+  // Analytics apply only to the filtered view
+  const expenses = filteredTransactions.filter(t => t.type === 'Expense');
+  const filteredTotalExpenses = expenses.reduce((acc, t) => acc + t.amountUSD, 0);
 
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -186,8 +201,8 @@ export default function Home() {
   const daysSinceFirst = Math.max(1, Math.ceil((now.getTime() - firstTxDate) / (1000 * 60 * 60 * 24)));
   const monthsSinceFirst = Math.max(1, daysSinceFirst / 30);
 
-  const dailyAverage = totalExpenses / daysSinceFirst;
-  const monthlyAverage = totalExpenses / monthsSinceFirst;
+  const dailyAverage = filteredTotalExpenses / daysSinceFirst;
+  const monthlyAverage = filteredTotalExpenses / monthsSinceFirst;
 
 
   return (
@@ -230,46 +245,96 @@ export default function Home() {
       </header>
 
       <main className="max-w-md mx-auto px-4">
-        {/* Action Buttons */}
-        <div className="grid grid-cols-2 gap-4 mb-8">
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="group relative overflow-hidden bg-white text-emerald-600 font-semibold p-4 rounded-2xl shadow-sm border border-emerald-100 hover:shadow-md transition-all active:scale-95 flex flex-col items-center justify-center gap-2"
-          >
-            <div className="bg-emerald-100 p-3 rounded-full group-hover:scale-110 transition-transform">
-              <PlusCircle className="w-6 h-6" />
+        {/* NEW WALLETS SECTION */}
+        <div className="mb-8">
+          <h2 className="text-lg font-bold text-gray-800 mb-4 px-1">Carteiras Wise</h2>
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <button
+              onClick={() => setSelectedWise(selectedWise === 'Daniel' ? null : 'Daniel')}
+              className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 ${selectedWise === 'Daniel' ? 'bg-indigo-900 border-indigo-700 text-white shadow-md scale-100' : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300 hover:bg-indigo-50/50'}`}
+            >
+              <Wallet className="w-6 h-6" />
+              <span className="font-bold">Wise Daniel</span>
+            </button>
+            <button
+              onClick={() => setSelectedWise(selectedWise === 'Marília' ? null : 'Marília')}
+              className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 ${selectedWise === 'Marília' ? 'bg-rose-100 border-rose-300 text-rose-800 shadow-md scale-100' : 'bg-white border-gray-200 text-gray-600 hover:border-rose-300 hover:bg-rose-50/50'}`}
+            >
+              <Wallet className="w-6 h-6" />
+              <span className="font-bold">Wise Marília</span>
+            </button>
+          </div>
+
+          {selectedWise && (
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 animate-in fade-in slide-in-from-top-2">
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <p className="text-sm text-gray-500 font-bold uppercase tracking-wide">Saldo Disponível</p>
+                  <p className={`text-3xl font-black ${selectedWise === 'Daniel' ? 'text-indigo-900' : 'text-rose-800'}`}>
+                    ${formatCurrency(selectedWise === 'Daniel' ? danielBalance : mariliaBalance)}
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setShowAddModal(true)}
+                  className="bg-emerald-50 text-emerald-600 font-bold p-3 rounded-xl border border-emerald-100 hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2"
+                >
+                  <PlusCircle className="w-5 h-5" />
+                  Comprar Dólar
+                </button>
+                <button
+                  onClick={() => setShowExpenseModal(true)}
+                  className="bg-rose-50 text-rose-600 font-bold p-3 rounded-xl border border-rose-100 hover:bg-rose-100 transition-colors flex items-center justify-center gap-2"
+                >
+                  <MinusCircle className="w-5 h-5" />
+                  Registrar Gasto
+                </button>
+              </div>
             </div>
-            Comprar Dólar
-          </button>
-          <button
-            onClick={() => setShowExpenseModal(true)}
-            className="group relative overflow-hidden bg-white text-rose-600 font-semibold p-4 rounded-2xl shadow-sm border border-rose-100 hover:shadow-md transition-all active:scale-95 flex flex-col items-center justify-center gap-2"
-          >
-            <div className="bg-rose-100 p-3 rounded-full group-hover:scale-110 transition-transform">
-              <MinusCircle className="w-6 h-6" />
-            </div>
-            Registrar Gasto
-          </button>
+          )}
         </div>
 
         {/* Transactions List */}
         <div>
-          <h2 className="text-lg font-bold text-gray-800 mb-4 px-1">Histórico (Carnêzinho)</h2>
+          <div className="flex justify-between items-end mb-4 px-1">
+            <h2 className="text-lg font-bold text-gray-800">Histórico</h2>
+            <div className="flex bg-gray-200/50 p-1 rounded-lg">
+              <button 
+                onClick={() => setHistoryFilter('Total')} 
+                className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Total' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Total
+              </button>
+              <button 
+                onClick={() => setHistoryFilter('Daniel')} 
+                className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Daniel' ? 'bg-indigo-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Daniel
+              </button>
+              <button 
+                onClick={() => setHistoryFilter('Marília')} 
+                className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Marília' ? 'bg-rose-100 text-rose-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Marília
+              </button>
+            </div>
+          </div>
 
-          {isLoading && transactions.length === 0 ? (
+          {isLoading && filteredTransactions.length === 0 ? (
             <div className="space-y-3">
               {[1, 2, 3].map(i => (
                 <div key={i} className="animate-pulse bg-white p-4 rounded-2xl h-20 shadow-sm border border-gray-100"></div>
               ))}
             </div>
-          ) : transactions.length === 0 ? (
+          ) : filteredTransactions.length === 0 ? (
             <div className="text-center p-8 bg-white rounded-2xl border border-dashed border-gray-300">
               <HandCoins className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-500 font-medium">Nenhum registro ainda.</p>
+              <p className="text-gray-500 font-medium">Nenhum registro ainda nesta carteira.</p>
             </div>
           ) : (
             <div className="space-y-3">
-              {transactions.map(tx => {
+              {filteredTransactions.map(tx => {
                 const isDaniel = tx.person === 'Daniel';
                 const isDeposit = tx.type === 'Deposit';
                 const isItemDeleting = isDeleting === tx.id;
@@ -333,25 +398,7 @@ export default function Home() {
 
             <form onSubmit={showAddModal ? handleDeposit : handleExpense} className="space-y-4">
 
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Quem?</label>
-                <div className="flex gap-2 p-1 bg-gray-100 rounded-2xl">
-                  <button
-                    type="button"
-                    onClick={() => setPerson('Daniel')}
-                    className={`flex-1 py-3 px-2 rounded-xl font-bold transition-all ${person === 'Daniel' ? 'bg-indigo-900 text-white shadow-md scale-100' : 'bg-transparent text-gray-500 hover:bg-gray-200'}`}
-                  >
-                    Daniel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPerson('Marília')}
-                    className={`flex-1 py-3 px-2 rounded-xl font-bold transition-all ${person === 'Marília' ? 'bg-rose-100 border border-rose-300 text-rose-800 shadow-md scale-100' : 'bg-transparent text-gray-500 hover:bg-gray-200'}`}
-                  >
-                    Marília
-                  </button>
-                </div>
-              </div>
+              {/* A Pessoa (Quem) agora é associada automaticamente com a carteira Wise selecionada */}
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Valor (USD)</label>
