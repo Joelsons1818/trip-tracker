@@ -453,7 +453,8 @@ export default function Home() {
               </div>
 
               <div className="bg-cyan-50 p-5 rounded-2xl border border-cyan-100 relative overflow-hidden">
-                <div className="absolute top-4 right-4 z-10">
+                <div className="flex justify-between items-start mb-2 relative z-10">
+                  <p className="text-sm text-cyan-700 font-bold uppercase tracking-wide">Este Mês</p>
                   <div className="relative">
                     <select
                       value={selectedMonthStr}
@@ -468,8 +469,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <p className="text-sm text-cyan-700 font-bold mb-1 uppercase tracking-wide relative z-0">Este Mês</p>
-                <p className="text-4xl font-black text-cyan-900 mb-2 relative z-0">${formatCurrency(spendSelectedMonth)}</p>
+                <p className="text-4xl font-black text-cyan-900 relative z-0 break-words">${formatCurrency(spendSelectedMonth)}</p>
               </div>
 
               <div className="grid grid-cols-2 gap-3 pt-2">

@@ -49,7 +49,9 @@ const parseDate = (val: string | number) => {
         if (parts[3]) h = parseInt(parts[3], 10);
         if (parts[4]) m = parseInt(parts[4], 10);
         if (parts[5]) s = parseInt(parts[5], 10);
-        const d = new Date(year, month, day, h, m, s);
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        const strForm = `${year}-${pad(month+1)}-${pad(day)}T${pad(h)}:${pad(m)}:${pad(s)}-03:00`;
+        const d = new Date(strForm);
         if (!isNaN(d.getTime())) return d.toISOString();
     }
     const fallback = new Date(str);
