@@ -37,6 +37,31 @@ const generateMonthOptions = () => {
   return options;
 };
 
+const getCategoryColorClass = (category: string) => {
+  const pastelColors = [
+    'bg-slate-50 text-slate-600 border-slate-200',
+    'bg-red-50 text-red-600 border-red-200',
+    'bg-orange-50 text-orange-600 border-orange-200',
+    'bg-amber-50 text-amber-600 border-amber-200',
+    'bg-lime-50 text-lime-600 border-lime-200',
+    'bg-emerald-50 text-emerald-600 border-emerald-200',
+    'bg-teal-50 text-teal-600 border-teal-200',
+    'bg-cyan-50 text-cyan-600 border-cyan-200',
+    'bg-sky-50 text-sky-600 border-sky-200',
+    'bg-indigo-50 text-indigo-600 border-indigo-200',
+    'bg-violet-50 text-violet-600 border-violet-200',
+    'bg-purple-50 text-purple-600 border-purple-200',
+    'bg-fuchsia-50 text-fuchsia-600 border-fuchsia-200',
+    'bg-rose-50 text-rose-600 border-rose-200',
+  ];
+  if (!category) return pastelColors[0];
+  let hash = 0;
+  for (let i = 0; i < category.length; i++) {
+    hash = category.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return pastelColors[Math.abs(hash) % pastelColors.length];
+};
+
 export default function Home() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -421,8 +446,8 @@ export default function Home() {
 
                 // Color Themes (High contrast)
                 const personBg = isDaniel
-                  ? 'bg-green-100 border border-green-300 text-green-800 shadow-sm'
-                  : 'bg-yellow-100 border border-yellow-300 text-yellow-800 shadow-sm';
+                  ? 'bg-blue-50 border border-blue-200 text-blue-700 shadow-sm'
+                  : 'bg-yellow-50 border border-yellow-200 text-yellow-700 shadow-sm';
 
                 return (
                   <div key={tx.id} className={`bg-white p-4 rounded-2xl shadow-sm border border-gray-200 flex items-center justify-between transition-all ${isItemDeleting ? 'opacity-50 scale-95' : 'hover:border-gray-300'}`}>
@@ -439,7 +464,7 @@ export default function Home() {
                             </span>
                           </div>
                           {tx.category && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 uppercase tracking-wider mt-0.5">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider mt-0.5 ${getCategoryColorClass(tx.category)}`}>
                               {tx.category}
                             </span>
                           )}
@@ -541,7 +566,7 @@ export default function Home() {
                           key={cat.id}
                           type="button"
                           onClick={() => setCategoryName(cat.name)}
-                          className={`px-3 py-1.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${categoryName === cat.name ? 'bg-rose-500 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                          className={`px-3 py-1.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap border ${categoryName === cat.name ? 'shadow-md border-gray-400 opacity-100 scale-105' : 'opacity-70 hover:opacity-100 border-transparent'} ${getCategoryColorClass(cat.name)}`}
                           title={cat.codebook}
                         >
                           {cat.name}
