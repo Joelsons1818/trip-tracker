@@ -432,10 +432,15 @@ export default function Home() {
                       </div>
                       <div className="truncate pr-2">
                         <p className="font-bold text-gray-800 truncate">{isDeposit ? 'Compra de Dólar' : tx.description}</p>
-                        <div className="flex items-center gap-2 mt-1">
+                        <div className="flex items-center flex-wrap gap-2 mt-1">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${personBg}`}>
                             {tx.person}
                           </span>
+                          {tx.category && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 uppercase tracking-wider">
+                              {tx.category}
+                            </span>
+                          )}
                           <span className="text-xs text-gray-400 font-medium shrink-0">
                             {new Date(tx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
                           </span>
