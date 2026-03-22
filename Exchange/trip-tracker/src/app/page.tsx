@@ -88,6 +88,7 @@ export default function Home() {
   const [newCatCodebook, setNewCatCodebook] = useState('');
 
   // Analytics State
+  const [expandedStatsCategory, setExpandedStatsCategory] = useState<string | null>(null);
   const [selectedMonthStr, setSelectedMonthStr] = useState(() => {
     const today = new Date();
     return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
@@ -677,14 +678,40 @@ export default function Home() {
                   <p className="text-sm text-gray-400 font-medium">Nenhum gasto no mês.</p>
                 ) : (
                   <div className="space-y-3">
-                    {sortedCategories.map(([catName, amount]) => (
-                      <div key={catName} className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-gray-100 shadow-sm">
-                        <span className={`text-[11px] font-bold px-3 py-1 rounded-full border uppercase tracking-wider ${getCategoryColorClass(catName)}`}>
-                          {catName}
-                        </span>
-                        <span className="text-sm font-black text-slate-700">${formatCurrency(amount)}</span>
+                    {sortedCategories.map(([catName, amount]) => {
+                      const isExpanded = expandedStatsCategory === catName;
+                      const catExpenses = expensesSelectedMonth.filter(t => (t.category || 'Outros') === catName).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                      return (
+                      <div key={catName} className="flex flex-col bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden mb-2 transition-all">
+                        <button 
+                          onClick={() => setExpandedStatsCategory(isExpanded ? null : catName)}
+                          className="flex justify-between items-center p-2.5 w-full text-left hover:bg-gray-50 transition-colors"
+                        >
+                          <span className={`text-[11px] font-bold px-3 py-1 rounded-full border uppercase tracking-wider ${getCategoryColorClass(catName)}`}>
+                            {catName}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-black text-slate-700">${formatCurrency(amount)}</span>
+                            <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                          </div>
+                        </button>
+                        {isExpanded && (
+                          <div className="bg-slate-50 border-t border-gray-100 p-2 space-y-1.5 max-h-48 overflow-y-auto">
+                            {catExpenses.map(tx => (
+                              <div key={tx.id} className="flex justify-between items-center p-2 rounded-lg bg-white border border-gray-100 shadow-sm">
+                                <div className="truncate pr-2">
+                                  <p className="font-semibold text-xs text-slate-700 truncate">{tx.description}</p>
+                                  <p className="text-[10px] font-bold text-gray-400 mt-0.5 whitespace-nowrap">{new Date(tx.date).toLocaleDateString('pt-BR')}</p>
+                                </div>
+                                <span className="font-bold text-xs text-slate-600 shrink-0">
+                                  ${formatCurrency(tx.amountUSD)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    ))}
+                    )})}
                   </div>
                 )}
               </div>
