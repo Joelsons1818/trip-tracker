@@ -678,12 +678,11 @@ export default function Home() {
                 ) : (
                   <div className="space-y-3">
                     {sortedCategories.map(([catName, amount]) => (
-                      <div key={catName} className="flex justify-between items-center">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-rose-400"></div>
-                          <span className="text-sm font-semibold text-gray-700">{catName}</span>
-                        </div>
-                        <span className="text-sm font-black text-rose-600">${formatCurrency(amount)}</span>
+                      <div key={catName} className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-gray-100 shadow-sm">
+                        <span className={`text-[11px] font-bold px-3 py-1 rounded-full border uppercase tracking-wider ${getCategoryColorClass(catName)}`}>
+                          {catName}
+                        </span>
+                        <span className="text-sm font-black text-slate-700">${formatCurrency(amount)}</span>
                       </div>
                     ))}
                   </div>
