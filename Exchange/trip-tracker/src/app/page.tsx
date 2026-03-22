@@ -280,7 +280,7 @@ export default function Home() {
 
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const startOfWeek = new Date(startOfDay - now.getDay() * 24 * 60 * 60 * 1000).getTime();
+  const startOfWeek = new Date(startOfDay - 6 * 24 * 60 * 60 * 1000).getTime();
 
   // Selected Month Logic
   const startOfSelectedMonth = new Date(selYear, selMonth, 1).getTime();
