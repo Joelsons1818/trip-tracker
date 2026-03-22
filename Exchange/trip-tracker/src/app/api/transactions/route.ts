@@ -69,7 +69,7 @@ export async function GET() {
         }
 
         const sheetName = await getFirstSheetName(sheets, sheetId);
-        const range = `${sheetName}!A2:G`;
+        const range = `${sheetName}!A2:H`;
 
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: sheetId,
@@ -89,6 +89,7 @@ export async function GET() {
             amountUSD: parseNumber(row[4]),
             costBRL: row[5] ? parseNumber(row[5]) : undefined,
             description: row[6] || undefined,
+            category: row[7] || undefined,
             rowIndex: index + 1,
         }));
 
@@ -110,7 +111,7 @@ export async function POST(request: Request) {
         }
 
         const sheetName = await getFirstSheetName(sheets, sheetId);
-        const range = `${sheetName}!A2:G`;
+        const range = `${sheetName}!A2:H`;
 
         await sheets.spreadsheets.values.append({
             spreadsheetId: sheetId,
@@ -125,7 +126,8 @@ export async function POST(request: Request) {
                         body.person,
                         body.amountUSD,
                         body.costBRL || '',
-                        body.description || ''
+                        body.description || '',
+                        body.category || ''
                     ]
                 ],
             },
@@ -183,5 +185,44 @@ export async function DELETE(request: Request) {
     } catch (error: any) {
         console.error('Error deleting transaction:', error);
         return NextResponse.json({ error: 'Failed to delete transaction' }, { status: 500 });
+    }
+}
+
+export async function PUT(request: Request) {
+    try {
+        const body: Transaction = await request.json();
+        if (!body.rowIndex) return NextResponse.json({ error: 'Missing rowIndex' }, { status: 400 });
+
+        const sheets = await getGoogleSheets();
+        const sheetId = process.env.GOOGLE_SHEET_ID;
+        if (!sheetId) return NextResponse.json({ error: 'Missing GOOGLE_SHEET_ID' }, { status: 500 });
+
+        const sheetName = await getFirstSheetName(sheets, sheetId);
+        const range = `${sheetName}!A${body.rowIndex}:H${body.rowIndex}`;
+
+        await sheets.spreadsheets.values.update({
+            spreadsheetId: sheetId,
+            range: range,
+            valueInputOption: 'USER_ENTERED',
+            requestBody: {
+                values: [
+                    [
+                        body.id,
+                        body.date,
+                        body.type,
+                        body.person,
+                        body.amountUSD,
+                        body.costBRL || '',
+                        body.description || '',
+                        body.category || ''
+                    ]
+                ]
+            }
+        });
+
+        return NextResponse.json({ success: true, transaction: body });
+    } catch (error: any) {
+        console.error('Error updating transaction:', error);
+        return NextResponse.json({ error: 'Failed to update transaction' }, { status: 500 });
     }
 }

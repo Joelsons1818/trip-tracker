@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Transaction } from '@/types';
-import { PlusCircle, MinusCircle, Wallet, ArrowUpRight, ArrowDownRight, RefreshCw, HandCoins, Trash2, BarChart2, X, Calendar, ChevronDown } from 'lucide-react';
+import { Transaction, Category } from '@/types';
+import { PlusCircle, MinusCircle, Wallet, ArrowUpRight, ArrowDownRight, RefreshCw, HandCoins, Trash2, BarChart2, X, Calendar, ChevronDown, Settings, Edit3, Tag, HelpCircle } from 'lucide-react';
 
 const parseInputNumber = (val: string) => {
     if (!val) return 0;
@@ -39,6 +39,7 @@ const generateMonthOptions = () => {
 
 export default function Home() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
 
@@ -46,6 +47,8 @@ export default function Home() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
+  const [showCategorySettings, setShowCategorySettings] = useState(false);
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
   // New Wise State
   const [selectedWise, setSelectedWise] = useState<'Daniel' | 'Marília' | null>(null);
@@ -53,6 +56,11 @@ export default function Home() {
   const [amountUSD, setAmountUSD] = useState('');
   const [costBRL, setCostBRL] = useState('');
   const [description, setDescription] = useState('');
+  const [categoryName, setCategoryName] = useState('');
+  
+  // Category management state
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatCodebook, setNewCatCodebook] = useState('');
 
   // Analytics State
   const [selectedMonthStr, setSelectedMonthStr] = useState(() => {
@@ -74,8 +82,19 @@ export default function Home() {
     setIsLoading(false);
   };
 
+  const fetchCategories = async () => {
+    try {
+      const res = await fetch('/api/categories');
+      const data = await res.json();
+      if (data.categories) setCategories(data.categories);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   useEffect(() => {
     fetchTransactions();
+    fetchCategories();
   }, []);
 
   const handleDeposit = async (e: React.FormEvent) => {
@@ -85,21 +104,23 @@ export default function Home() {
     setShowAddModal(false);
     setIsLoading(true);
 
-    const newTx: Transaction = {
-      id: crypto.randomUUID(),
-      date: new Date().toISOString(),
+    const payload: Transaction = {
+      id: editingTx ? editingTx.id : crypto.randomUUID(),
+      date: editingTx ? editingTx.date : new Date().toISOString(),
       type: 'Deposit',
-      person: selectedWise || 'Daniel',
+      person: editingTx ? editingTx.person : (selectedWise || 'Daniel'),
       amountUSD: parseInputNumber(amountUSD),
-      costBRL: parseInputNumber(costBRL)
+      costBRL: parseInputNumber(costBRL),
+      rowIndex: editingTx ? editingTx.rowIndex : undefined
     };
 
     setAmountUSD('');
     setCostBRL('');
+    setEditingTx(null);
 
     await fetch('/api/transactions', {
-      method: 'POST',
-      body: JSON.stringify(newTx),
+      method: editingTx ? 'PUT' : 'POST',
+      body: JSON.stringify(payload),
       headers: { 'Content-Type': 'application/json' }
     });
 
@@ -108,30 +129,50 @@ export default function Home() {
 
   const handleExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amountUSD || !description) return;
+    if (!amountUSD || !description || !categoryName) {
+        alert("Preencha todos os campos e selecione uma categoria!");
+        return;
+    }
 
     setShowExpenseModal(false);
     setIsLoading(true);
 
-    const newTx: Transaction = {
-      id: crypto.randomUUID(),
-      date: new Date().toISOString(),
+    const payload: Transaction = {
+      id: editingTx ? editingTx.id : crypto.randomUUID(),
+      date: editingTx ? editingTx.date : new Date().toISOString(),
       type: 'Expense',
-      person: selectedWise || 'Daniel',
+      person: editingTx ? editingTx.person : (selectedWise || 'Daniel'),
       amountUSD: parseInputNumber(amountUSD),
-      description
+      description,
+      category: categoryName,
+      rowIndex: editingTx ? editingTx.rowIndex : undefined
     };
 
     setAmountUSD('');
     setDescription('');
+    setCategoryName('');
+    setEditingTx(null);
 
     await fetch('/api/transactions', {
-      method: 'POST',
-      body: JSON.stringify(newTx),
+      method: editingTx ? 'PUT' : 'POST',
+      body: JSON.stringify(payload),
       headers: { 'Content-Type': 'application/json' }
     });
 
     fetchTransactions();
+  };
+
+  const openEditModal = (tx: Transaction) => {
+    setEditingTx(tx);
+    setAmountUSD(tx.amountUSD.toString());
+    if (tx.type === 'Deposit') {
+        setCostBRL(tx.costBRL?.toString() || '');
+        setShowAddModal(true);
+    } else {
+        setDescription(tx.description || '');
+        setCategoryName(tx.category || '');
+        setShowExpenseModal(true);
+    }
   };
 
   const handleDelete = async (tx: Transaction) => {
@@ -158,6 +199,29 @@ export default function Home() {
   const totalDeposits = transactions.filter(t => t.type === 'Deposit').reduce((acc, t) => acc + t.amountUSD, 0);
   const totalExpenses = transactions.filter(t => t.type === 'Expense').reduce((acc, t) => acc + t.amountUSD, 0);
   const balance = totalDeposits - totalExpenses;
+
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCatName) return;
+    setIsLoading(true);
+    await fetch('/api/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newCatName, codebook: newCatCodebook })
+    });
+    setNewCatName('');
+    setNewCatCodebook('');
+    fetchCategories();
+    setIsLoading(false);
+  };
+
+  const handleDeleteCategory = async (nameC: string) => {
+    if (!confirm('Deletar essa categoria? Ela desaparecerá da lista, mas não apagará o histórico passado.')) return;
+    setIsLoading(true);
+    await fetch(`/api/categories?id=${encodeURIComponent(nameC)}`, { method: 'DELETE' });
+    fetchCategories();
+    setIsLoading(false);
+  };
 
   const getPersonBalance = (p: 'Daniel'|'Marília') => {
     const deps = transactions.filter(t => t.type === 'Deposit' && t.person === p).reduce((acc, t) => acc + t.amountUSD, 0);
@@ -196,6 +260,19 @@ export default function Home() {
     if (time >= startOfSelectedMonth && time < endOfSelectedMonth) spendSelectedMonth += t.amountUSD;
   });
 
+  // Category Breakdown logic for the selected month
+  const expensesSelectedMonth = expenses.filter(t => {
+     const time = new Date(t.date).getTime();
+     return time >= startOfSelectedMonth && time < endOfSelectedMonth;
+  });
+  
+  const categoryTotals: Record<string, number> = {};
+  expensesSelectedMonth.forEach(t => {
+      const cat = t.category || 'Outros';
+      categoryTotals[cat] = (categoryTotals[cat] || 0) + t.amountUSD;
+  });
+  const sortedCategories = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]);
+
   // Calculate Averages
   let firstTxDate = expenses.length > 0 ? new Date(expenses[expenses.length - 1].date).getTime() : now.getTime();
   const daysSinceFirst = Math.max(1, Math.ceil((now.getTime() - firstTxDate) / (1000 * 60 * 60 * 24)));
@@ -215,7 +292,10 @@ export default function Home() {
               Trip Tracker
             </h1>
             <div className="flex gap-2">
-              <button onClick={() => setShowStatsModal(true)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-full transition-colors">
+              <button onClick={() => setShowCategorySettings(true)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-full transition-colors" title="Gerenciar Categorias">
+                <Settings className="w-5 h-5 text-purple-300" />
+              </button>
+              <button onClick={() => setShowStatsModal(true)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-full transition-colors" title="Visão de Gastos">
                 <BarChart2 className="w-5 h-5 text-cyan-300" />
               </button>
               <button onClick={fetchTransactions} className="p-2 hover:bg-slate-800 rounded-full transition-colors">
@@ -372,6 +452,14 @@ export default function Home() {
                         )}
                       </div>
                       <button
+                        onClick={() => openEditModal(tx)}
+                        disabled={isItemDeleting || isLoading}
+                        className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors disabled:opacity-50"
+                        title="Editar transação"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                      <button
                         onClick={() => handleDelete(tx)}
                         disabled={isItemDeleting || isLoading}
                         className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors disabled:opacity-50"
@@ -393,7 +481,7 @@ export default function Home() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm transition-opacity">
           <div className="bg-white rounded-[2rem] w-full max-w-sm p-6 shadow-2xl">
             <h3 className="text-xl font-bold mb-5 flex items-center gap-2">
-              {showAddModal ? <><PlusCircle className="text-emerald-500" /> Comprar Dólar</> : <><MinusCircle className="text-rose-500" /> Registrar Gasto</>}
+              {showAddModal ? <><PlusCircle className="text-emerald-500" /> {editingTx ? 'Editar Dólar' : 'Comprar Dólar'}</> : <><MinusCircle className="text-rose-500" /> {editingTx ? 'Editar Gasto' : 'Registrar Gasto'}</>}
             </h3>
 
             <form onSubmit={showAddModal ? handleDeposit : handleExpense} className="space-y-4">
@@ -435,17 +523,35 @@ export default function Home() {
               )}
 
               {showExpenseModal && (
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Descrição</label>
-                  <input
-                    type="text"
-                    required
-                    value={description}
-                    onChange={e => setDescription(e.target.value)}
-                    className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold focus:border-rose-500 focus:bg-white outline-none transition-all"
-                    placeholder="Ex: Restaurante Shake Shack"
-                  />
-                </div>
+                <>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-1"><Tag className="w-4 h-4 text-rose-500" /> Categoria</label>
+                    <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-1">
+                      {categories.map(cat => (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          onClick={() => setCategoryName(cat.name)}
+                          className={`px-3 py-1.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${categoryName === cat.name ? 'bg-rose-500 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                          title={cat.codebook}
+                        >
+                          {cat.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1 mt-2">Descrição</label>
+                    <input
+                      type="text"
+                      required
+                      value={description}
+                      onChange={e => setDescription(e.target.value)}
+                      className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold focus:border-rose-500 focus:bg-white outline-none transition-all"
+                      placeholder="Ex: Restaurante Shake Shack"
+                    />
+                  </div>
+                </>
               )}
 
               <div className="flex gap-2 pt-5">
@@ -454,6 +560,7 @@ export default function Home() {
                   onClick={() => {
                     setShowAddModal(false);
                     setShowExpenseModal(false);
+                    setEditingTx(null);
                   }}
                   className="flex-1 py-3.5 text-gray-500 font-bold hover:bg-gray-100 rounded-xl transition-colors"
                 >
@@ -487,7 +594,7 @@ export default function Home() {
               <BarChart2 className="text-cyan-500" /> Visão de Gastos
             </h3>
 
-            <div className="space-y-4">
+            <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1 pb-4">
               <div className="grid grid-cols-2 gap-3 pb-4 border-b border-gray-100">
                 <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
                   <p className="text-xs text-slate-500 font-bold mb-1 uppercase tracking-wide">Hoje</p>
@@ -519,7 +626,7 @@ export default function Home() {
                 <p className="text-4xl font-black text-cyan-900 relative z-0 break-words">${formatCurrency(spendSelectedMonth)}</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 pt-2">
+              <div className="grid grid-cols-2 gap-3 pt-2 pb-4 border-b border-gray-100">
                 <div>
                   <p className="text-[11px] text-gray-400 font-bold mb-1 uppercase tracking-wide">Média Diária (Anual)</p>
                   <p className="text-lg font-bold text-gray-700">${formatCurrency(dailyAverage)}</p>
@@ -530,7 +637,77 @@ export default function Home() {
                 </div>
               </div>
 
+              <div className="pt-2">
+                <p className="text-xs text-slate-500 font-bold mb-3 uppercase tracking-wide flex items-center gap-1"><Tag className="w-3 h-3" /> Categorias Neste Mês</p>
+                {sortedCategories.length === 0 ? (
+                  <p className="text-sm text-gray-400 font-medium">Nenhum gasto no mês.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {sortedCategories.map(([catName, amount]) => (
+                      <div key={catName} className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-rose-400"></div>
+                          <span className="text-sm font-semibold text-gray-700">{catName}</span>
+                        </div>
+                        <span className="text-sm font-black text-rose-600">${formatCurrency(amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* CATEGORY SETTINGS MODAL */}
+      {showCategorySettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm transition-opacity">
+          <div className="bg-white rounded-[2rem] w-full max-w-sm p-6 shadow-2xl relative flex flex-col max-h-[90vh]">
+            <button
+              onClick={() => setShowCategorySettings(false)}
+              className="absolute top-4 right-4 p-2 bg-gray-100 text-gray-500 hover:bg-gray-200 rounded-full transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className="text-xl font-bold mb-6 flex items-center gap-2 text-slate-800">
+              <Settings className="text-purple-500" /> Categorias
+            </h3>
+
+            <div className="overflow-y-auto flex-1 pr-2 space-y-3 mb-4 min-h-[50vh]">
+              {categories.map(cat => (
+                <div key={cat.id} className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-bold text-slate-800 items-center flex gap-1"><Tag className="w-3 h-3 text-purple-400" /> {cat.name}</p>
+                    <p className="text-xs text-slate-500 mt-1">{cat.codebook}</p>
+                  </div>
+                  <button onClick={() => handleDeleteCategory(cat.name)} className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <form onSubmit={handleCreateCategory} className="pt-4 border-t border-gray-100 mt-auto">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Nova Categoria</p>
+              <div className="space-y-3">
+                <input
+                  type="text" required placeholder="Nome (Ex: Padaria)"
+                  value={newCatName} onChange={e => setNewCatName(e.target.value)}
+                  className="w-full bg-gray-50 border-2 border-gray-200 rounded-xl px-4 py-2 text-sm font-semibold focus:border-purple-500 focus:bg-white outline-none"
+                />
+                <input
+                  type="text" required placeholder="O que entra aqui? (Codebook)"
+                  value={newCatCodebook} onChange={e => setNewCatCodebook(e.target.value)}
+                  className="w-full bg-gray-50 border-2 border-gray-200 rounded-xl px-4 py-2 text-sm font-semibold focus:border-purple-500 focus:bg-white outline-none"
+                />
+                <button type="submit" disabled={isLoading} className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 rounded-xl shadow-md transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                  <PlusCircle className="w-4 h-4" /> Adicionar Categoria
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

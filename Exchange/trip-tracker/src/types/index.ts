@@ -6,5 +6,12 @@ export interface Transaction {
     amountUSD: number;
     costBRL?: number;
     description?: string;
-    rowIndex?: number; // Row index in Google Sheets to allow easy deletion
+    category?: string;
+    rowIndex?: number; // Row index in Google Sheets to allow easy deletion/editing
+}
+
+export interface Category {
+    id: string;
+    name: string;
+    codebook: string;
 }
