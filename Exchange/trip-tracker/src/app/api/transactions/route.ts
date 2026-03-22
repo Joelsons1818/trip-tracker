@@ -90,7 +90,7 @@ export async function GET() {
             costBRL: row[5] ? parseNumber(row[5]) : undefined,
             description: row[6] || undefined,
             category: row[7] || undefined,
-            rowIndex: index + 1,
+            rowIndex: index + 2,
         }));
 
         return NextResponse.json({ transactions: transactions.reverse() });
@@ -172,8 +172,8 @@ export async function DELETE(request: Request) {
                             range: {
                                 sheetId: firstSheetId,
                                 dimension: 'ROWS',
-                                startIndex: rowIndex,
-                                endIndex: rowIndex + 1,
+                                startIndex: rowIndex - 1,
+                                endIndex: rowIndex,
                             }
                         }
                     }
