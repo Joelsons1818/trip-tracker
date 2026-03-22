@@ -421,8 +421,8 @@ export default function Home() {
 
                 // Color Themes (High contrast)
                 const personBg = isDaniel
-                  ? 'bg-indigo-900 border border-indigo-700 text-indigo-50 shadow-sm'
-                  : 'bg-rose-100 border border-rose-300 text-rose-800 shadow-sm';
+                  ? 'bg-green-100 border border-green-300 text-green-800 shadow-sm'
+                  : 'bg-yellow-100 border border-yellow-300 text-yellow-800 shadow-sm';
 
                 return (
                   <div key={tx.id} className={`bg-white p-4 rounded-2xl shadow-sm border border-gray-200 flex items-center justify-between transition-all ${isItemDeleting ? 'opacity-50 scale-95' : 'hover:border-gray-300'}`}>
@@ -432,18 +432,20 @@ export default function Home() {
                       </div>
                       <div className="truncate pr-2">
                         <p className="font-bold text-gray-800 truncate">{isDeposit ? 'Compra de Dólar' : tx.description}</p>
-                        <div className="flex items-center flex-wrap gap-2 mt-1">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${personBg}`}>
-                            {tx.person}
-                          </span>
+                        <div className="flex flex-col items-start gap-1 mt-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${personBg}`}>
+                              {tx.person}
+                            </span>
+                            <span className="text-xs text-gray-400 font-medium">
+                              {new Date(tx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                            </span>
+                          </div>
                           {tx.category && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 uppercase tracking-wider">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 uppercase tracking-wider mt-0.5">
                               {tx.category}
                             </span>
                           )}
-                          <span className="text-xs text-gray-400 font-medium shrink-0">
-                            {new Date(tx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
-                          </span>
                         </div>
                       </div>
                     </div>
