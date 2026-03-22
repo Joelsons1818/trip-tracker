@@ -24,18 +24,20 @@ const formatCurrency = (val: number) => {
   return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
-const generateMonthOptions = () => {
-  const options = [];
-  const today = new Date();
-  let d = new Date(today.getFullYear(), today.getMonth() - 12, 1);
-  for (let i = 0; i < 36; i++) {
-    const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    const label = d.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
-    options.push({ value, label: label.charAt(0).toUpperCase() + label.slice(1).replace('.', '') });
-    d.setMonth(d.getMonth() + 1);
-  }
-  return options;
-};
+const MONTHS = [
+  { value: 0, label: 'Jan' },
+  { value: 1, label: 'Fev' },
+  { value: 2, label: 'Mar' },
+  { value: 3, label: 'Abr' },
+  { value: 4, label: 'Mai' },
+  { value: 5, label: 'Jun' },
+  { value: 6, label: 'Jul' },
+  { value: 7, label: 'Ago' },
+  { value: 8, label: 'Set' },
+  { value: 9, label: 'Out' },
+  { value: 10, label: 'Nov' },
+  { value: 11, label: 'Dez' },
+];
 
 const getCategoryColorClass = (category: string) => {
   const pastelColors = [
@@ -89,10 +91,14 @@ export default function Home() {
 
   // Analytics State
   const [expandedStatsCategory, setExpandedStatsCategory] = useState<string | null>(null);
-  const [selectedMonthStr, setSelectedMonthStr] = useState(() => {
-    const today = new Date();
-    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-  });
+  
+  const [selMonth, setSelMonth] = useState(new Date().getMonth());
+  const [selYear, setSelYear] = useState(new Date().getFullYear());
+
+  const [avgStartMonth, setAvgStartMonth] = useState(new Date().getMonth());
+  const [avgStartYear, setAvgStartYear] = useState(new Date().getFullYear());
+  const [avgEndMonth, setAvgEndMonth] = useState(new Date().getMonth());
+  const [avgEndYear, setAvgEndYear] = useState(new Date().getFullYear());
 
   const fetchTransactions = async () => {
     setIsLoading(true);
@@ -264,6 +270,12 @@ export default function Home() {
   // --- Analytics Calculations ---
   // Analytics apply only to the filtered view
   const expenses = filteredTransactions.filter(t => t.type === 'Expense');
+
+  const txYears = Array.from(new Set(transactions.map(t => new Date(t.date).getFullYear())));
+  const availableYears = txYears.length > 0 ? txYears : [new Date().getFullYear()];
+  if (!availableYears.includes(new Date().getFullYear())) availableYears.push(new Date().getFullYear());
+  if (!availableYears.includes(new Date().getFullYear() + 1)) availableYears.push(new Date().getFullYear() + 1);
+  availableYears.sort((a, b) => a - b);
   const filteredTotalExpenses = expenses.reduce((acc, t) => acc + t.amountUSD, 0);
 
   const now = new Date();
@@ -271,9 +283,8 @@ export default function Home() {
   const startOfWeek = new Date(startOfDay - now.getDay() * 24 * 60 * 60 * 1000).getTime();
 
   // Selected Month Logic
-  const [selYear, selMonth] = selectedMonthStr.split('-').map(Number);
-  const startOfSelectedMonth = new Date(selYear, selMonth - 1, 1).getTime();
-  const endOfSelectedMonth = new Date(selYear, selMonth, 1).getTime(); // 1st of next month
+  const startOfSelectedMonth = new Date(selYear, selMonth, 1).getTime();
+  const endOfSelectedMonth = new Date(selYear, selMonth + 1, 1).getTime(); // 1st of next month
 
   let spendToday = 0;
   let spendThisWeek = 0;
@@ -299,13 +310,22 @@ export default function Home() {
   });
   const sortedCategories = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]);
 
-  // Calculate Averages
-  let firstTxDate = expenses.length > 0 ? new Date(expenses[expenses.length - 1].date).getTime() : now.getTime();
-  const daysSinceFirst = Math.max(1, Math.ceil((now.getTime() - firstTxDate) / (1000 * 60 * 60 * 24)));
-  const monthsSinceFirst = Math.max(1, daysSinceFirst / 30);
+  // Custom Average Logic
+  const startOfAvg = new Date(avgStartYear, avgStartMonth, 1).getTime();
+  const endOfAvg = new Date(avgEndYear, avgEndMonth + 1, 1).getTime();
+  
+  const expensesInAvgRange = expenses.filter(t => {
+     const time = new Date(t.date).getTime();
+     return time >= startOfAvg && time < endOfAvg;
+  });
+  const totalAvgExpenses = expensesInAvgRange.reduce((acc, t) => acc + t.amountUSD, 0);
 
-  const dailyAverage = filteredTotalExpenses / daysSinceFirst;
-  const monthlyAverage = filteredTotalExpenses / monthsSinceFirst;
+  let monthsInAvg = (avgEndYear - avgStartYear) * 12 + (avgEndMonth - avgStartMonth) + 1;
+  if (monthsInAvg <= 0) monthsInAvg = 1;
+  const daysInAvg = Math.max(1, (endOfAvg - startOfAvg) / (1000 * 60 * 60 * 24));
+
+  const dailyAverage = totalAvgExpenses / daysInAvg;
+  const monthlyAverage = totalAvgExpenses / monthsInAvg;
 
 
   return (
@@ -642,33 +662,73 @@ export default function Home() {
               </div>
 
               <div className="bg-cyan-50 p-5 rounded-2xl border border-cyan-100 relative overflow-hidden">
-                <div className="flex justify-between items-start mb-2 relative z-10">
-                  <p className="text-sm text-cyan-700 font-bold uppercase tracking-wide">Este Mês</p>
-                  <div className="relative">
-                    <select
-                      value={selectedMonthStr}
-                      onChange={e => setSelectedMonthStr(e.target.value)}
-                      className="appearance-none bg-cyan-100/80 hover:bg-cyan-200 text-cyan-800 font-bold text-sm pl-3 pr-8 py-1.5 rounded-lg border border-cyan-200 cursor-pointer transition-colors outline-none focus:ring-2 focus:ring-cyan-500"
-                    >
-                      {generateMonthOptions().map(opt => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                      ))}
-                    </select>
-                    <ChevronDown className="w-4 h-4 text-cyan-700 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <div className="flex justify-between items-start mb-2 relative z-10 w-full">
+                  <p className="text-sm text-cyan-700 font-bold uppercase tracking-wide flex-shrink-0 mt-1">Este Mês</p>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="relative">
+                      <select value={selMonth} onChange={e => setSelMonth(Number(e.target.value))} className="appearance-none bg-cyan-100/80 hover:bg-cyan-200 text-cyan-800 font-bold text-sm pl-2 pr-6 py-1.5 rounded-lg border border-cyan-200 cursor-pointer outline-none">
+                        {MONTHS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                      </select>
+                      <ChevronDown className="w-3 h-3 text-cyan-700 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                    <div className="relative">
+                      <select value={selYear} onChange={e => setSelYear(Number(e.target.value))} className="appearance-none bg-cyan-100/80 hover:bg-cyan-200 text-cyan-800 font-bold text-sm pl-2 pr-6 py-1.5 rounded-lg border border-cyan-200 cursor-pointer outline-none">
+                        {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                      </select>
+                      <ChevronDown className="w-3 h-3 text-cyan-700 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
                   </div>
                 </div>
 
                 <p className="text-4xl font-black text-cyan-900 relative z-0 break-words">${formatCurrency(spendSelectedMonth)}</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 pt-2 pb-4 border-b border-gray-100">
-                <div>
-                  <p className="text-[11px] text-gray-400 font-bold mb-1 uppercase tracking-wide">Média Diária (Anual)</p>
-                  <p className="text-lg font-bold text-gray-700">${formatCurrency(dailyAverage)}</p>
+              <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 mb-4 mt-1">
+                <p className="text-xs text-gray-500 font-bold uppercase tracking-wide mb-3">Média Personalizada</p>
+                <div className="flex justify-between items-center mb-3">
+                  <span className="text-[10px] font-bold text-slate-400 w-8">DE:</span>
+                  <div className="flex gap-1.5">
+                    <div className="relative">
+                      <select value={avgStartMonth} onChange={e => setAvgStartMonth(Number(e.target.value))} className="appearance-none text-xs font-bold text-slate-700 bg-white border border-gray-200 rounded p-1.5 pr-6 outline-none">
+                         {MONTHS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                      </select>
+                      <ChevronDown className="w-3 h-3 text-gray-400 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                    <div className="relative">
+                      <select value={avgStartYear} onChange={e => setAvgStartYear(Number(e.target.value))} className="appearance-none text-xs font-bold text-slate-700 bg-white border border-gray-200 rounded p-1.5 pr-6 outline-none">
+                         {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                      </select>
+                      <ChevronDown className="w-3 h-3 text-gray-400 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-[11px] text-gray-400 font-bold mb-1 uppercase tracking-wide">Média Mensal</p>
-                  <p className="text-lg font-bold text-gray-700">${formatCurrency(monthlyAverage)}</p>
+                <div className="flex justify-between items-center mb-4">
+                  <span className="text-[10px] font-bold text-slate-400 w-8">ATÉ:</span>
+                  <div className="flex gap-1.5">
+                    <div className="relative">
+                      <select value={avgEndMonth} onChange={e => setAvgEndMonth(Number(e.target.value))} className="appearance-none text-xs font-bold text-slate-700 bg-white border border-gray-200 rounded p-1.5 pr-6 outline-none">
+                         {MONTHS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                      </select>
+                      <ChevronDown className="w-3 h-3 text-gray-400 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                    <div className="relative">
+                      <select value={avgEndYear} onChange={e => setAvgEndYear(Number(e.target.value))} className="appearance-none text-xs font-bold text-slate-700 bg-white border border-gray-200 rounded p-1.5 pr-6 outline-none">
+                         {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                      </select>
+                      <ChevronDown className="w-3 h-3 text-gray-400 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-3 border-t border-gray-200">
+                  <div>
+                    <p className="text-[10px] text-gray-500 font-bold mb-0.5 uppercase tracking-wide">Média Diária</p>
+                    <p className="text-lg font-black text-gray-800">${formatCurrency(dailyAverage)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-gray-500 font-bold mb-0.5 uppercase tracking-wide">Média Mensal</p>
+                    <p className="text-lg font-black text-gray-800">${formatCurrency(monthlyAverage)}</p>
+                  </div>
                 </div>
               </div>
 
