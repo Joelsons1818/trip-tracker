@@ -437,9 +437,6 @@ export default function Home() {
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${personBg}`}>
                               {tx.person}
                             </span>
-                            <span className="text-xs text-gray-400 font-medium">
-                              {new Date(tx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
-                            </span>
                           </div>
                           {tx.category && (
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 uppercase tracking-wider mt-0.5">
@@ -449,31 +446,36 @@ export default function Home() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <div className="text-right">
-                        <p className={`font-black text-[17px] ${isDeposit ? 'text-emerald-500' : 'text-rose-600'}`}>
-                          {isDeposit ? '+' : '-'}${formatCurrency(tx.amountUSD)}
-                        </p>
-                        {isDeposit && tx.costBRL && (
-                          <p className="text-[11px] text-gray-400 font-semibold">R$ {formatCurrency(tx.costBRL)}</p>
-                        )}
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                        {new Date(tx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                      </span>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <p className={`font-black text-[17px] ${isDeposit ? 'text-emerald-500' : 'text-rose-600'} leading-none`}>
+                            {isDeposit ? '+' : '-'}${formatCurrency(tx.amountUSD)}
+                          </p>
+                          {isDeposit && tx.costBRL && (
+                            <p className="text-[11px] text-gray-400 font-semibold mt-1">R$ {formatCurrency(tx.costBRL)}</p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => openEditModal(tx)}
+                          disabled={isItemDeleting || isLoading}
+                          className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors disabled:opacity-50"
+                          title="Editar transação"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(tx)}
+                          disabled={isItemDeleting || isLoading}
+                          className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors disabled:opacity-50"
+                          title="Apagar transação"
+                        >
+                          {isItemDeleting ? <RefreshCw className="w-4 h-4 animate-spin text-red-400" /> : <Trash2 className="w-4 h-4" />}
+                        </button>
                       </div>
-                      <button
-                        onClick={() => openEditModal(tx)}
-                        disabled={isItemDeleting || isLoading}
-                        className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors disabled:opacity-50"
-                        title="Editar transação"
-                      >
-                        <Edit3 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(tx)}
-                        disabled={isItemDeleting || isLoading}
-                        className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors disabled:opacity-50"
-                        title="Apagar transação"
-                      >
-                        {isItemDeleting ? <RefreshCw className="w-4 h-4 animate-spin text-red-400" /> : <Trash2 className="w-4 h-4" />}
-                      </button>
                     </div>
                   </div>
                 )
