@@ -39,6 +39,21 @@ const dateInputToIso = (dateValue: string) => `${dateValue}T12:00:00.000Z`;
 
 const getTodayDateInput = () => formatDateForInput(new Date().toISOString());
 
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+
+const getTransactionDateKey = (dateValue: string) => {
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return Number.NaN;
+
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+};
+
+const getLocalDateKey = (date: Date) => Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+
+const getMonthStartKey = (year: number, month: number) => Date.UTC(year, month, 1);
+
+const getNextMonthStartKey = (year: number, month: number) => Date.UTC(year, month + 1, 1);
+
 const MONTHS = [
   { value: 0, label: 'Jan' },
   { value: 1, label: 'Fev' },
@@ -298,36 +313,46 @@ export default function Home() {
   // Analytics apply only to the filtered view
   const expenses = filteredTransactions.filter(t => t.type === 'Expense');
 
-  const txYears = Array.from(new Set(transactions.map(t => new Date(t.date).getFullYear())));
+  const txYears = Array.from(new Set(transactions
+    .map(t => {
+      const dateKey = getTransactionDateKey(t.date);
+      return Number.isNaN(dateKey) ? null : new Date(dateKey).getUTCFullYear();
+    })
+    .filter((year): year is number => year !== null)));
   const availableYears = txYears.length > 0 ? txYears : [new Date().getFullYear()];
   if (!availableYears.includes(new Date().getFullYear())) availableYears.push(new Date().getFullYear());
   if (!availableYears.includes(new Date().getFullYear() + 1)) availableYears.push(new Date().getFullYear() + 1);
   availableYears.sort((a, b) => a - b);
-  const filteredTotalExpenses = expenses.reduce((acc, t) => acc + t.amountUSD, 0);
 
   const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const startOfWeek = new Date(startOfDay - 6 * 24 * 60 * 60 * 1000).getTime();
+  const todayKey = getLocalDateKey(now);
+  const tomorrowKey = todayKey + DAY_IN_MS;
+  const startOfWeek = todayKey - 6 * DAY_IN_MS;
 
   // Selected Month Logic
-  const startOfSelectedMonth = new Date(selYear, selMonth, 1).getTime();
-  const endOfSelectedMonth = new Date(selYear, selMonth + 1, 1).getTime(); // 1st of next month
+  const startOfSelectedMonth = getMonthStartKey(selYear, selMonth);
+  const isSelectedCurrentMonth = selYear === now.getFullYear() && selMonth === now.getMonth();
+  const endOfSelectedMonth = isSelectedCurrentMonth
+    ? tomorrowKey
+    : getNextMonthStartKey(selYear, selMonth);
 
   let spendToday = 0;
   let spendThisWeek = 0;
   let spendSelectedMonth = 0;
 
   expenses.forEach(t => {
-    const time = new Date(t.date).getTime();
-    if (time >= startOfDay) spendToday += t.amountUSD;
-    if (time >= startOfWeek) spendThisWeek += t.amountUSD;
-    if (time >= startOfSelectedMonth && time < endOfSelectedMonth) spendSelectedMonth += t.amountUSD;
+    const dateKey = getTransactionDateKey(t.date);
+    if (Number.isNaN(dateKey)) return;
+
+    if (dateKey >= todayKey && dateKey < tomorrowKey) spendToday += t.amountUSD;
+    if (dateKey >= startOfWeek && dateKey < tomorrowKey) spendThisWeek += t.amountUSD;
+    if (dateKey >= startOfSelectedMonth && dateKey < endOfSelectedMonth) spendSelectedMonth += t.amountUSD;
   });
 
   // Category Breakdown logic for the selected month
   const expensesSelectedMonth = expenses.filter(t => {
-     const time = new Date(t.date).getTime();
-     return time >= startOfSelectedMonth && time < endOfSelectedMonth;
+     const dateKey = getTransactionDateKey(t.date);
+     return !Number.isNaN(dateKey) && dateKey >= startOfSelectedMonth && dateKey < endOfSelectedMonth;
   });
   
   const categoryTotals: Record<string, number> = {};
@@ -338,21 +363,26 @@ export default function Home() {
   const sortedCategories = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]);
 
   // Custom Average Logic
-  const startOfAvg = new Date(avgStartYear, avgStartMonth, 1).getTime();
-  const endOfAvg = new Date(avgEndYear, avgEndMonth + 1, 1).getTime();
+  const startOfAvg = getMonthStartKey(avgStartYear, avgStartMonth);
+  const selectedEndOfAvg = getNextMonthStartKey(avgEndYear, avgEndMonth);
+  const endOfAvg = selectedEndOfAvg > startOfAvg
+    ? selectedEndOfAvg
+    : getNextMonthStartKey(avgStartYear, avgStartMonth);
   
   const expensesInAvgRange = expenses.filter(t => {
-     const time = new Date(t.date).getTime();
-     return time >= startOfAvg && time < endOfAvg;
+     const dateKey = getTransactionDateKey(t.date);
+     return !Number.isNaN(dateKey) && dateKey >= startOfAvg && dateKey < endOfAvg;
   });
   const totalAvgExpenses = expensesInAvgRange.reduce((acc, t) => acc + t.amountUSD, 0);
 
   let monthsInAvg = (avgEndYear - avgStartYear) * 12 + (avgEndMonth - avgStartMonth) + 1;
   if (monthsInAvg <= 0) monthsInAvg = 1;
-  const daysInAvg = Math.max(1, (endOfAvg - startOfAvg) / (1000 * 60 * 60 * 24));
+  const daysInAvg = Math.max(1, (endOfAvg - startOfAvg) / DAY_IN_MS);
 
   const dailyAverage = totalAvgExpenses / daysInAvg;
   const monthlyAverage = totalAvgExpenses / monthsInAvg;
+  const selectedMonthLabel = isSelectedCurrentMonth ? 'Este Mês' : 'Mês Selecionado';
+  const selectedCategoriesLabel = isSelectedCurrentMonth ? 'Categorias Neste Mês' : 'Categorias no Mês';
 
 
   return (
@@ -735,7 +765,7 @@ export default function Home() {
 
               <div className="bg-cyan-50 p-5 rounded-2xl border border-cyan-100 relative overflow-hidden">
                 <div className="flex justify-between items-start mb-2 relative z-10 w-full">
-                  <p className="text-sm text-cyan-700 font-bold uppercase tracking-wide flex-shrink-0 mt-1">Este Mês</p>
+                  <p className="text-sm text-cyan-700 font-bold uppercase tracking-wide flex-shrink-0 mt-1">{selectedMonthLabel}</p>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <div className="relative">
                       <select value={selMonth} onChange={e => setSelMonth(Number(e.target.value))} className="appearance-none bg-cyan-100/80 hover:bg-cyan-200 text-cyan-800 font-bold text-sm pl-2 pr-6 py-1.5 rounded-lg border border-cyan-200 cursor-pointer outline-none">
@@ -805,7 +835,7 @@ export default function Home() {
               </div>
 
               <div className="pt-2">
-                <p className="text-xs text-slate-500 font-bold mb-3 uppercase tracking-wide flex items-center gap-1"><Tag className="w-3 h-3" /> Categorias Neste Mês</p>
+                <p className="text-xs text-slate-500 font-bold mb-3 uppercase tracking-wide flex items-center gap-1"><Tag className="w-3 h-3" /> {selectedCategoriesLabel}</p>
                 {sortedCategories.length === 0 ? (
                   <p className="text-sm text-gray-400 font-medium">Nenhum gasto no mês.</p>
                 ) : (
