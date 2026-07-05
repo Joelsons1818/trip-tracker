@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Transaction, Category } from '@/types';
-import { PlusCircle, MinusCircle, Wallet, ArrowUpRight, ArrowDownRight, RefreshCw, HandCoins, Trash2, BarChart2, X, Calendar, ChevronDown, Settings, Edit3, Tag, HelpCircle } from 'lucide-react';
+import { PlusCircle, MinusCircle, Wallet, ArrowUpRight, ArrowDownRight, RefreshCw, HandCoins, Trash2, BarChart2, X, Calendar, ChevronDown, Settings, Edit3, Tag } from 'lucide-react';
 
 const parseInputNumber = (val: string) => {
     if (!val) return 0;
@@ -23,6 +23,21 @@ const parseInputNumber = (val: string) => {
 const formatCurrency = (val: number) => {
   return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
+
+const formatDateForInput = (dateValue: string) => {
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+};
+
+const dateInputToIso = (dateValue: string) => `${dateValue}T12:00:00.000Z`;
+
+const getTodayDateInput = () => formatDateForInput(new Date().toISOString());
 
 const MONTHS = [
   { value: 0, label: 'Jan' },
@@ -84,6 +99,7 @@ export default function Home() {
   const [costBRL, setCostBRL] = useState('');
   const [description, setDescription] = useState('');
   const [categoryName, setCategoryName] = useState('');
+  const [transactionDate, setTransactionDate] = useState(() => getTodayDateInput());
   
   // Category management state
   const [newCatName, setNewCatName] = useState('');
@@ -161,7 +177,7 @@ export default function Home() {
 
   const handleExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amountUSD || !description || !categoryName) {
+    if (!amountUSD || !description || !categoryName || !transactionDate) {
         alert("Preencha todos os campos e selecione uma categoria!");
         return;
     }
@@ -171,7 +187,7 @@ export default function Home() {
 
     const payload: Transaction = {
       id: editingTx ? editingTx.id : crypto.randomUUID(),
-      date: editingTx ? editingTx.date : new Date().toISOString(),
+      date: dateInputToIso(transactionDate),
       type: 'Expense',
       person: editingTx ? editingTx.person : (selectedWise || 'Daniel'),
       amountUSD: parseInputNumber(amountUSD),
@@ -183,6 +199,7 @@ export default function Home() {
     setAmountUSD('');
     setDescription('');
     setCategoryName('');
+    setTransactionDate(getTodayDateInput());
     setEditingTx(null);
 
     await fetch('/api/transactions', {
@@ -203,8 +220,18 @@ export default function Home() {
     } else {
         setDescription(tx.description || '');
         setCategoryName(tx.category || '');
+        setTransactionDate(formatDateForInput(tx.date));
         setShowExpenseModal(true);
     }
+  };
+
+  const openNewExpenseModal = () => {
+    setEditingTx(null);
+    setAmountUSD('');
+    setDescription('');
+    setCategoryName('');
+    setTransactionDate(getTodayDateInput());
+    setShowExpenseModal(true);
   };
 
   const handleDelete = async (tx: Transaction) => {
@@ -410,7 +437,7 @@ export default function Home() {
                   Comprar Dólar
                 </button>
                 <button
-                  onClick={() => setShowExpenseModal(true)}
+                  onClick={openNewExpenseModal}
                   className="bg-rose-50 text-rose-600 font-bold p-3 rounded-xl border border-rose-100 hover:bg-rose-100 transition-colors flex items-center justify-center gap-2"
                 >
                   <MinusCircle className="w-5 h-5" />
@@ -471,40 +498,56 @@ export default function Home() {
                   : 'bg-yellow-50 border border-yellow-200 text-yellow-700 shadow-sm';
 
                 return (
-                  <div key={tx.id} className={`bg-white p-4 rounded-2xl shadow-sm border border-gray-200 flex items-center justify-between transition-all ${isItemDeleting ? 'opacity-50 scale-95' : 'hover:border-gray-300'}`}>
-                    <div className="flex items-center gap-4 truncate">
+                  <div key={tx.id} className={`bg-white p-4 rounded-2xl shadow-sm border border-gray-200 flex items-center justify-between gap-3 transition-all ${isItemDeleting ? 'opacity-50 scale-95' : 'hover:border-gray-300'}`}>
+                    <div className="flex items-start gap-4 min-w-0">
                       <div className={`shrink-0 w-12 h-12 rounded-full flex items-center justify-center ${isDeposit ? 'bg-emerald-100' : 'bg-red-50'}`}>
                         {isDeposit ? <ArrowDownRight className="w-6 h-6 text-emerald-600" /> : <ArrowUpRight className="w-6 h-6 text-rose-500" />}
                       </div>
-                      <div className="truncate pr-2">
+                      <div className="min-w-0 pr-2">
                         <p className="font-bold text-gray-800 truncate">{isDeposit ? 'Compra de Dólar' : tx.description}</p>
-                        <div className="flex flex-col items-start gap-1 mt-1">
-                          <div className="flex items-center gap-2">
+                        {isDeposit ? (
+                          <div className="flex flex-col items-start gap-1 mt-1">
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${personBg}`}>
                               {tx.person}
                             </span>
                           </div>
-                          {tx.category && (
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider mt-0.5 ${getCategoryColorClass(tx.category)}`}>
-                              {tx.category}
-                            </span>
-                          )}
-                        </div>
+                        ) : (
+                          <div className="flex flex-col items-start gap-1 mt-2">
+                            <p className="font-black text-[17px] text-rose-600 leading-none">-${formatCurrency(tx.amountUSD)}</p>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                                {new Date(tx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                              </span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${personBg}`}>
+                                {tx.person}
+                              </span>
+                            </div>
+                            {tx.category && (
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider mt-0.5 ${getCategoryColorClass(tx.category)}`}>
+                                {tx.category}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="flex flex-col items-end gap-1.5 shrink-0">
-                      <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-                        {new Date(tx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
-                      </span>
+                      {isDeposit && (
+                        <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                          {new Date(tx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                        </span>
+                      )}
                       <div className="flex items-center gap-3">
-                        <div className="text-right">
-                          <p className={`font-black text-[17px] ${isDeposit ? 'text-emerald-500' : 'text-rose-600'} leading-none`}>
-                            {isDeposit ? '+' : '-'}${formatCurrency(tx.amountUSD)}
-                          </p>
-                          {isDeposit && tx.costBRL && (
-                            <p className="text-[11px] text-gray-400 font-semibold mt-1">R$ {formatCurrency(tx.costBRL)}</p>
-                          )}
-                        </div>
+                        {isDeposit && (
+                          <div className="text-right">
+                            <p className="font-black text-[17px] text-emerald-500 leading-none">
+                              +${formatCurrency(tx.amountUSD)}
+                            </p>
+                            {tx.costBRL && (
+                              <p className="text-[11px] text-gray-400 font-semibold mt-1">R$ {formatCurrency(tx.costBRL)}</p>
+                            )}
+                          </div>
+                        )}
                         <button
                           onClick={() => openEditModal(tx)}
                           disabled={isItemDeleting || isLoading}
@@ -543,42 +586,81 @@ export default function Home() {
 
               {/* A Pessoa (Quem) agora é associada automaticamente com a carteira Wise selecionada */}
 
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Valor (USD)</label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    required
-                    value={amountUSD}
-                    onChange={e => setAmountUSD(e.target.value)}
-                    className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 pl-8 text-lg font-bold focus:border-slate-800 focus:bg-white outline-none transition-all"
-                    placeholder="0.00"
-                  />
-                </div>
-              </div>
-
               {showAddModal && (
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Custo em Reais (BRL)</label>
-                  <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">R$</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      required
-                      value={costBRL}
-                      onChange={e => setCostBRL(e.target.value)}
-                      className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 pl-10 text-lg font-bold focus:border-emerald-500 focus:bg-white outline-none transition-all"
-                      placeholder="0.00"
-                    />
+                <>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Valor (USD)</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        required
+                        value={amountUSD}
+                        onChange={e => setAmountUSD(e.target.value)}
+                        className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 pl-8 text-lg font-bold focus:border-slate-800 focus:bg-white outline-none transition-all"
+                        placeholder="0.00"
+                      />
+                    </div>
                   </div>
-                </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Custo em Reais (BRL)</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">R$</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        required
+                        value={costBRL}
+                        onChange={e => setCostBRL(e.target.value)}
+                        className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 pl-10 text-lg font-bold focus:border-emerald-500 focus:bg-white outline-none transition-all"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+                </>
               )}
 
               {showExpenseModal && (
                 <>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Descrição</label>
+                    <input
+                      type="text"
+                      required
+                      value={description}
+                      onChange={e => setDescription(e.target.value)}
+                      className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold focus:border-rose-500 focus:bg-white outline-none transition-all"
+                      placeholder="Ex: Restaurante Shake Shack"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Valor (USD)</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        required
+                        value={amountUSD}
+                        onChange={e => setAmountUSD(e.target.value)}
+                        className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 pl-8 text-lg font-bold focus:border-rose-500 focus:bg-white outline-none transition-all"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                      <Calendar className="w-4 h-4 text-rose-500" /> Data da compra
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={transactionDate}
+                      onChange={e => setTransactionDate(e.target.value)}
+                      className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold focus:border-rose-500 focus:bg-white outline-none transition-all"
+                    />
+                  </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-1"><Tag className="w-4 h-4 text-rose-500" /> Categoria</label>
                     <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-1">
@@ -595,17 +677,6 @@ export default function Home() {
                       ))}
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1 mt-2">Descrição</label>
-                    <input
-                      type="text"
-                      required
-                      value={description}
-                      onChange={e => setDescription(e.target.value)}
-                      className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold focus:border-rose-500 focus:bg-white outline-none transition-all"
-                      placeholder="Ex: Restaurante Shake Shack"
-                    />
-                  </div>
                 </>
               )}
 
@@ -615,6 +686,7 @@ export default function Home() {
                   onClick={() => {
                     setShowAddModal(false);
                     setShowExpenseModal(false);
+                    setTransactionDate(getTodayDateInput());
                     setEditingTx(null);
                   }}
                   className="flex-1 py-3.5 text-gray-500 font-bold hover:bg-gray-100 rounded-xl transition-colors"
