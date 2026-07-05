@@ -41,18 +41,14 @@ const getTodayDateInput = () => formatDateForInput(new Date().toISOString());
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
-const getTransactionDateKey = (dateValue: string) => {
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return Number.NaN;
+const getLocalDateOnlyKey = (date: Date) => Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
 
-  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+const getDaysBetweenLocalDates = (startDate: Date, endDate: Date) => {
+  const startKey = getLocalDateOnlyKey(startDate);
+  const endKey = getLocalDateOnlyKey(endDate);
+
+  return Math.max(1, (endKey - startKey) / DAY_IN_MS);
 };
-
-const getLocalDateKey = (date: Date) => Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
-
-const getMonthStartKey = (year: number, month: number) => Date.UTC(year, month, 1);
-
-const getNextMonthStartKey = (year: number, month: number) => Date.UTC(year, month + 1, 1);
 
 const MONTHS = [
   { value: 0, label: 'Jan' },
@@ -315,8 +311,8 @@ export default function Home() {
 
   const txYears = Array.from(new Set(transactions
     .map(t => {
-      const dateKey = getTransactionDateKey(t.date);
-      return Number.isNaN(dateKey) ? null : new Date(dateKey).getUTCFullYear();
+      const date = new Date(t.date);
+      return Number.isNaN(date.getTime()) ? null : date.getFullYear();
     })
     .filter((year): year is number => year !== null)));
   const availableYears = txYears.length > 0 ? txYears : [new Date().getFullYear()];
@@ -325,34 +321,34 @@ export default function Home() {
   availableYears.sort((a, b) => a - b);
 
   const now = new Date();
-  const todayKey = getLocalDateKey(now);
-  const tomorrowKey = todayKey + DAY_IN_MS;
-  const startOfWeek = todayKey - 6 * DAY_IN_MS;
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+  const startOfWeek = startOfDay - 6 * DAY_IN_MS;
 
   // Selected Month Logic
-  const startOfSelectedMonth = getMonthStartKey(selYear, selMonth);
+  const startOfSelectedMonth = new Date(selYear, selMonth, 1).getTime();
   const isSelectedCurrentMonth = selYear === now.getFullYear() && selMonth === now.getMonth();
   const endOfSelectedMonth = isSelectedCurrentMonth
-    ? tomorrowKey
-    : getNextMonthStartKey(selYear, selMonth);
+    ? endOfDay
+    : new Date(selYear, selMonth + 1, 1).getTime();
 
   let spendToday = 0;
   let spendThisWeek = 0;
   let spendSelectedMonth = 0;
 
   expenses.forEach(t => {
-    const dateKey = getTransactionDateKey(t.date);
-    if (Number.isNaN(dateKey)) return;
+    const time = new Date(t.date).getTime();
+    if (Number.isNaN(time)) return;
 
-    if (dateKey >= todayKey && dateKey < tomorrowKey) spendToday += t.amountUSD;
-    if (dateKey >= startOfWeek && dateKey < tomorrowKey) spendThisWeek += t.amountUSD;
-    if (dateKey >= startOfSelectedMonth && dateKey < endOfSelectedMonth) spendSelectedMonth += t.amountUSD;
+    if (time >= startOfDay && time < endOfDay) spendToday += t.amountUSD;
+    if (time >= startOfWeek && time < endOfDay) spendThisWeek += t.amountUSD;
+    if (time >= startOfSelectedMonth && time < endOfSelectedMonth) spendSelectedMonth += t.amountUSD;
   });
 
   // Category Breakdown logic for the selected month
   const expensesSelectedMonth = expenses.filter(t => {
-     const dateKey = getTransactionDateKey(t.date);
-     return !Number.isNaN(dateKey) && dateKey >= startOfSelectedMonth && dateKey < endOfSelectedMonth;
+     const time = new Date(t.date).getTime();
+     return !Number.isNaN(time) && time >= startOfSelectedMonth && time < endOfSelectedMonth;
   });
   
   const categoryTotals: Record<string, number> = {};
@@ -363,21 +359,23 @@ export default function Home() {
   const sortedCategories = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]);
 
   // Custom Average Logic
-  const startOfAvg = getMonthStartKey(avgStartYear, avgStartMonth);
-  const selectedEndOfAvg = getNextMonthStartKey(avgEndYear, avgEndMonth);
-  const endOfAvg = selectedEndOfAvg > startOfAvg
-    ? selectedEndOfAvg
-    : getNextMonthStartKey(avgStartYear, avgStartMonth);
+  const startOfAvgDate = new Date(avgStartYear, avgStartMonth, 1);
+  const selectedEndOfAvgDate = new Date(avgEndYear, avgEndMonth + 1, 1);
+  const endOfAvgDate = selectedEndOfAvgDate.getTime() > startOfAvgDate.getTime()
+    ? selectedEndOfAvgDate
+    : new Date(avgStartYear, avgStartMonth + 1, 1);
+  const startOfAvg = startOfAvgDate.getTime();
+  const endOfAvg = endOfAvgDate.getTime();
   
   const expensesInAvgRange = expenses.filter(t => {
-     const dateKey = getTransactionDateKey(t.date);
-     return !Number.isNaN(dateKey) && dateKey >= startOfAvg && dateKey < endOfAvg;
+     const time = new Date(t.date).getTime();
+     return !Number.isNaN(time) && time >= startOfAvg && time < endOfAvg;
   });
   const totalAvgExpenses = expensesInAvgRange.reduce((acc, t) => acc + t.amountUSD, 0);
 
   let monthsInAvg = (avgEndYear - avgStartYear) * 12 + (avgEndMonth - avgStartMonth) + 1;
   if (monthsInAvg <= 0) monthsInAvg = 1;
-  const daysInAvg = Math.max(1, (endOfAvg - startOfAvg) / DAY_IN_MS);
+  const daysInAvg = getDaysBetweenLocalDates(startOfAvgDate, endOfAvgDate);
 
   const dailyAverage = totalAvgExpenses / daysInAvg;
   const monthlyAverage = totalAvgExpenses / monthsInAvg;
