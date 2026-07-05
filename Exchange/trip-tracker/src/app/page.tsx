@@ -630,7 +630,7 @@ export default function Home() {
                       required
                       value={description}
                       onChange={e => setDescription(e.target.value)}
-                      className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold focus:border-rose-500 focus:bg-white outline-none transition-all"
+                      className="w-full h-14 bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold focus:border-rose-500 focus:bg-white outline-none transition-all"
                       placeholder="Ex: Restaurante Shake Shack"
                     />
                   </div>
@@ -644,7 +644,7 @@ export default function Home() {
                         required
                         value={amountUSD}
                         onChange={e => setAmountUSD(e.target.value)}
-                        className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 pl-8 text-lg font-bold focus:border-rose-500 focus:bg-white outline-none transition-all"
+                        className="w-full h-14 bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 pl-8 text-lg font-bold focus:border-rose-500 focus:bg-white outline-none transition-all"
                         placeholder="0.00"
                       />
                     </div>
@@ -658,7 +658,7 @@ export default function Home() {
                       required
                       value={transactionDate}
                       onChange={e => setTransactionDate(e.target.value)}
-                      className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold focus:border-rose-500 focus:bg-white outline-none transition-all"
+                      className="w-full h-14 appearance-none bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold leading-none focus:border-rose-500 focus:bg-white outline-none transition-all"
                     />
                   </div>
                   <div>
