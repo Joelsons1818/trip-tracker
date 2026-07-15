@@ -96,8 +96,17 @@ type HistoryItem =
       sentAmount: number;
       receivedAmount: number;
       fee: number;
+      outTx?: Transaction;
+      inTx?: Transaction;
       referenceTx: Transaction;
     };
+
+type TransferEditState = {
+  id: string;
+  sourceWallet: WalletId;
+  outTx: Transaction;
+  inTx: Transaction;
+};
 
 const walletTextClass: Record<WalletId, string> = {
   Daniel: 'text-indigo-900',
@@ -155,6 +164,7 @@ export default function Home() {
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [showCategorySettings, setShowCategorySettings] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
+  const [editingTransfer, setEditingTransfer] = useState<TransferEditState | null>(null);
 
   // Wallet state
   const [selectedWallet, setSelectedWallet] = useState<WalletId | null>(null);
@@ -166,6 +176,7 @@ export default function Home() {
   const [transferReceivedUSD, setTransferReceivedUSD] = useState('');
   const [transferFeeUSD, setTransferFeeUSD] = useState('');
   const [transferCalcMode, setTransferCalcMode] = useState<TransferCalcMode>(null);
+  const [transferSourceWallet, setTransferSourceWallet] = useState<WalletId | null>(null);
   const [transferDate, setTransferDate] = useState(() => getTodayDateInput());
   const [description, setDescription] = useState('');
   const [categoryName, setCategoryName] = useState('');
@@ -214,6 +225,21 @@ export default function Home() {
     fetchTransactions();
     fetchCategories();
   }, []);
+
+  const resetTransferForm = () => {
+    setTransferSentUSD('');
+    setTransferReceivedUSD('');
+    setTransferFeeUSD('');
+    setTransferCalcMode(null);
+    setTransferSourceWallet(null);
+    setTransferDate(getTodayDateInput());
+    setEditingTransfer(null);
+  };
+
+  const closeTransferModal = () => {
+    setShowTransferModal(false);
+    resetTransferForm();
+  };
 
   const handleDeposit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -283,7 +309,9 @@ export default function Home() {
 
   const handleTransferToBofA = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedWallet || selectedWallet === 'BofA') return;
+    const sourceWallet = transferSourceWallet || selectedWallet;
+
+    if (!sourceWallet || sourceWallet === 'BofA') return;
     if (!transferSentUSD || !transferReceivedUSD || !transferFeeUSD || !transferDate) return;
 
     const amountSent = parseSafeInputNumber(transferSentUSD);
@@ -296,43 +324,54 @@ export default function Home() {
       return;
     }
 
+    if (editingTransfer && (!editingTransfer.outTx.rowIndex || !editingTransfer.inTx.rowIndex)) {
+      alert('Não foi possível editar esta transferência porque faltam linhas da planilha.');
+      return;
+    }
+
     setShowTransferModal(false);
     setIsLoading(true);
 
-    const transferId = crypto.randomUUID();
+    const transferId = editingTransfer?.id || crypto.randomUUID();
     const transferDateIso = dateInputToIso(transferDate);
     const payload: Transaction[] = [
       {
-        id: `${transferId}-out`,
+        id: editingTransfer?.outTx.id || `${transferId}-out`,
         date: transferDateIso,
         type: 'TransferOut',
-        person: selectedWallet,
+        person: sourceWallet,
         amountUSD: amountSent,
         description: 'Transferência para BofA',
         category: 'BofA',
+        rowIndex: editingTransfer?.outTx.rowIndex,
       },
       {
-        id: `${transferId}-in`,
+        id: editingTransfer?.inTx.id || `${transferId}-in`,
         date: transferDateIso,
         type: 'TransferIn',
         person: 'BofA',
         amountUSD: amountReceived,
-        description: `Transferência de ${selectedWallet}`,
-        category: selectedWallet,
+        description: `Transferência de ${sourceWallet}`,
+        category: sourceWallet,
+        rowIndex: editingTransfer?.inTx.rowIndex,
       },
     ];
 
-    setTransferSentUSD('');
-    setTransferReceivedUSD('');
-    setTransferFeeUSD('');
-    setTransferCalcMode(null);
-    setTransferDate(getTodayDateInput());
+    resetTransferForm();
 
-    await fetch('/api/transactions', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-      headers: { 'Content-Type': 'application/json' }
-    });
+    if (editingTransfer) {
+      await Promise.all(payload.map(transaction => fetch('/api/transactions', {
+        method: 'PUT',
+        body: JSON.stringify(transaction),
+        headers: { 'Content-Type': 'application/json' }
+      })));
+    } else {
+      await fetch('/api/transactions', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
 
     fetchTransactions();
   };
@@ -373,12 +412,38 @@ export default function Home() {
   };
 
   const openTransferModal = () => {
+    if (!selectedWallet || selectedWallet === 'BofA') return;
+
     setEditingTx(null);
+    setEditingTransfer(null);
     setTransferSentUSD('');
     setTransferReceivedUSD('');
     setTransferFeeUSD('');
     setTransferCalcMode(null);
+    setTransferSourceWallet(selectedWallet);
     setTransferDate(getTodayDateInput());
+    setShowTransferModal(true);
+  };
+
+  const openEditTransferModal = (item: Extract<HistoryItem, { kind: 'transfer' }>) => {
+    if (!item.outTx || !item.inTx || !item.outTx.rowIndex || !item.inTx.rowIndex || item.sourceWallet === 'BofA') {
+      alert('Não foi possível editar esta transferência. Apague e registre novamente para corrigir.');
+      return;
+    }
+
+    setEditingTx(null);
+    setEditingTransfer({
+      id: item.id,
+      sourceWallet: item.sourceWallet,
+      outTx: item.outTx,
+      inTx: item.inTx,
+    });
+    setTransferSourceWallet(item.sourceWallet);
+    setTransferSentUSD(formatAutoAmount(item.sentAmount));
+    setTransferReceivedUSD(formatAutoAmount(item.receivedAmount));
+    setTransferFeeUSD(formatAutoAmount(item.fee));
+    setTransferCalcMode(null);
+    setTransferDate(formatDateForInput(item.date));
     setShowTransferModal(true);
   };
 
@@ -569,6 +634,8 @@ export default function Home() {
       sentAmount,
       receivedAmount,
       fee: Math.max(0, sentAmount - receivedAmount),
+      outTx,
+      inTx,
       referenceTx: outTx || inTx || tx,
     }];
   });
@@ -859,14 +926,24 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="flex flex-col items-end gap-1.5 shrink-0">
-                        <button
-                          onClick={() => handleDelete(item.referenceTx)}
-                          disabled={isItemDeleting || isLoading}
-                          className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors disabled:opacity-50"
-                          title="Apagar transferência"
-                        >
-                          {isItemDeleting ? <RefreshCw className="w-4 h-4 animate-spin text-red-400" /> : <Trash2 className="w-4 h-4" />}
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => openEditTransferModal(item)}
+                            disabled={isItemDeleting || isLoading}
+                            className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors disabled:opacity-50"
+                            title="Editar transferência"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(item.referenceTx)}
+                            disabled={isItemDeleting || isLoading}
+                            className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors disabled:opacity-50"
+                            title="Apagar transferência"
+                          >
+                            {isItemDeleting ? <RefreshCw className="w-4 h-4 animate-spin text-red-400" /> : <Trash2 className="w-4 h-4" />}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -1082,18 +1159,18 @@ export default function Home() {
         </div>
       )}
 
-      {showTransferModal && selectedWallet && selectedWallet !== 'BofA' && (
+      {showTransferModal && transferSourceWallet && transferSourceWallet !== 'BofA' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm transition-opacity">
           <div className="bg-white rounded-[2rem] w-full max-w-sm p-6 shadow-2xl">
             <h3 className="text-xl font-bold mb-5 flex items-center gap-2">
-              <Send className="text-blue-500" /> Transferir para BofA
+              <Send className="text-blue-500" /> {editingTransfer ? 'Editar transferência' : 'Transferir para BofA'}
             </h3>
 
             <form onSubmit={handleTransferToBofA} className="space-y-4">
               <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
                 <p className="text-xs text-blue-500 font-bold uppercase tracking-wide mb-1">Origem</p>
-                <p className="font-black text-blue-900">Wise {selectedWallet}</p>
-                <p className="text-sm text-blue-600 font-semibold mt-1">${formatCurrency(walletBalances[selectedWallet])} disponível</p>
+                <p className="font-black text-blue-900">Wise {transferSourceWallet}</p>
+                <p className="text-sm text-blue-600 font-semibold mt-1">${formatCurrency(walletBalances[transferSourceWallet])} disponível</p>
               </div>
 
               <div>
@@ -1160,14 +1237,7 @@ export default function Home() {
               <div className="flex gap-2 pt-5">
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowTransferModal(false);
-                    setTransferSentUSD('');
-                    setTransferReceivedUSD('');
-                    setTransferFeeUSD('');
-                    setTransferCalcMode(null);
-                    setTransferDate(getTodayDateInput());
-                  }}
+                  onClick={closeTransferModal}
                   className="flex-1 py-3.5 text-gray-500 font-bold hover:bg-gray-100 rounded-xl transition-colors"
                 >
                   Cancelar
@@ -1176,7 +1246,7 @@ export default function Home() {
                   type="submit"
                   className="flex-1 py-3.5 text-white font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 bg-blue-600 hover:bg-blue-700 shadow-blue-200"
                 >
-                  Transferir
+                  {editingTransfer ? 'Salvar' : 'Transferir'}
                 </button>
               </div>
             </form>
