@@ -25,6 +25,17 @@ const parseSafeInputNumber = (val: string) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const getOptionalInputNumber = (val: string) => {
+  if (!val.trim()) return null;
+
+  const parsed = parseInputNumber(val);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const formatAutoAmount = (val: number) => {
+  return Number.isFinite(val) && val >= 0 ? val.toFixed(2) : '';
+};
+
 const formatCurrency = (val: number) => {
   return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
@@ -70,6 +81,24 @@ const MONTHS = [
   { value: 11, label: 'Dez' },
 ];
 
+const WALLETS: WalletId[] = ['Daniel', 'Marília', 'BofA'];
+
+type HistoryPeriod = 'All' | 'Today' | 'Week' | 'Month';
+type TransferCalcMode = 'received' | 'fee' | null;
+
+type HistoryItem =
+  | { kind: 'transaction'; tx: Transaction }
+  | {
+      kind: 'transfer';
+      id: string;
+      date: string;
+      sourceWallet: WalletId;
+      sentAmount: number;
+      receivedAmount: number;
+      fee: number;
+      referenceTx: Transaction;
+    };
+
 const walletTextClass: Record<WalletId, string> = {
   Daniel: 'text-indigo-900',
   Marília: 'text-rose-800',
@@ -86,6 +115,7 @@ const isIncomingTransaction = (tx: Transaction) => tx.type === 'Deposit' || tx.t
 const isOutgoingTransaction = (tx: Transaction) => tx.type === 'Expense' || tx.type === 'TransferOut';
 const isTransferTransaction = (tx: Transaction) => tx.type === 'TransferIn' || tx.type === 'TransferOut';
 const getTransferGroupId = (id: string) => id.replace(/-(in|out)$/, '');
+const isWalletId = (value: string | undefined): value is WalletId => value === 'Daniel' || value === 'Marília' || value === 'BofA';
 
 const getCategoryColorClass = (category: string) => {
   const pastelColors = [
@@ -129,10 +159,14 @@ export default function Home() {
   // Wallet state
   const [selectedWallet, setSelectedWallet] = useState<WalletId | null>(null);
   const [historyFilter, setHistoryFilter] = useState<'Total' | WalletId>('Total');
+  const [historyPeriod, setHistoryPeriod] = useState<HistoryPeriod>('All');
   const [amountUSD, setAmountUSD] = useState('');
   const [costBRL, setCostBRL] = useState('');
   const [transferSentUSD, setTransferSentUSD] = useState('');
   const [transferReceivedUSD, setTransferReceivedUSD] = useState('');
+  const [transferFeeUSD, setTransferFeeUSD] = useState('');
+  const [transferCalcMode, setTransferCalcMode] = useState<TransferCalcMode>(null);
+  const [transferDate, setTransferDate] = useState(() => getTodayDateInput());
   const [description, setDescription] = useState('');
   const [categoryName, setCategoryName] = useState('');
   const [transactionDate, setTransactionDate] = useState(() => getTodayDateInput());
@@ -250,13 +284,15 @@ export default function Home() {
   const handleTransferToBofA = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedWallet || selectedWallet === 'BofA') return;
-    if (!transferSentUSD || !transferReceivedUSD) return;
+    if (!transferSentUSD || !transferReceivedUSD || !transferFeeUSD || !transferDate) return;
 
     const amountSent = parseSafeInputNumber(transferSentUSD);
     const amountReceived = parseSafeInputNumber(transferReceivedUSD);
+    const amountFee = parseSafeInputNumber(transferFeeUSD);
+    const amountsAreSynced = Math.abs(amountSent - amountReceived - amountFee) <= 0.01;
 
-    if (amountSent <= 0 || amountReceived <= 0 || amountReceived > amountSent) {
-      alert('Confira os valores da transferência. O valor que chega deve ser menor ou igual ao valor enviado.');
+    if (amountSent <= 0 || amountReceived <= 0 || amountFee < 0 || amountReceived > amountSent || amountFee > amountSent || !amountsAreSynced) {
+      alert('Confira os valores da transferência. O valor enviado precisa ser igual ao valor que chega mais a fee.');
       return;
     }
 
@@ -264,11 +300,11 @@ export default function Home() {
     setIsLoading(true);
 
     const transferId = crypto.randomUUID();
-    const transferDate = new Date().toISOString();
+    const transferDateIso = dateInputToIso(transferDate);
     const payload: Transaction[] = [
       {
         id: `${transferId}-out`,
-        date: transferDate,
+        date: transferDateIso,
         type: 'TransferOut',
         person: selectedWallet,
         amountUSD: amountSent,
@@ -277,7 +313,7 @@ export default function Home() {
       },
       {
         id: `${transferId}-in`,
-        date: transferDate,
+        date: transferDateIso,
         type: 'TransferIn',
         person: 'BofA',
         amountUSD: amountReceived,
@@ -288,6 +324,9 @@ export default function Home() {
 
     setTransferSentUSD('');
     setTransferReceivedUSD('');
+    setTransferFeeUSD('');
+    setTransferCalcMode(null);
+    setTransferDate(getTodayDateInput());
 
     await fetch('/api/transactions', {
       method: 'POST',
@@ -337,7 +376,68 @@ export default function Home() {
     setEditingTx(null);
     setTransferSentUSD('');
     setTransferReceivedUSD('');
+    setTransferFeeUSD('');
+    setTransferCalcMode(null);
+    setTransferDate(getTodayDateInput());
     setShowTransferModal(true);
+  };
+
+  const handleTransferSentChange = (value: string) => {
+    setTransferSentUSD(value);
+
+    const amountSent = getOptionalInputNumber(value);
+    const amountReceived = getOptionalInputNumber(transferReceivedUSD);
+    const amountFee = getOptionalInputNumber(transferFeeUSD);
+
+    if (amountSent === null) return;
+
+    if (transferCalcMode === 'fee' && amountFee !== null) {
+      setTransferReceivedUSD(formatAutoAmount(amountSent - amountFee));
+      return;
+    }
+
+    if (amountReceived !== null) {
+      setTransferFeeUSD(formatAutoAmount(amountSent - amountReceived));
+      return;
+    }
+
+    if (amountFee !== null) {
+      setTransferReceivedUSD(formatAutoAmount(amountSent - amountFee));
+    }
+  };
+
+  const handleTransferReceivedChange = (value: string) => {
+    setTransferReceivedUSD(value);
+    setTransferCalcMode('received');
+
+    const amountSent = getOptionalInputNumber(transferSentUSD);
+    const amountReceived = getOptionalInputNumber(value);
+
+    if (amountReceived === null) {
+      setTransferFeeUSD('');
+      return;
+    }
+
+    if (amountSent !== null) {
+      setTransferFeeUSD(formatAutoAmount(amountSent - amountReceived));
+    }
+  };
+
+  const handleTransferFeeChange = (value: string) => {
+    setTransferFeeUSD(value);
+    setTransferCalcMode('fee');
+
+    const amountSent = getOptionalInputNumber(transferSentUSD);
+    const amountFee = getOptionalInputNumber(value);
+
+    if (amountFee === null) {
+      setTransferReceivedUSD('');
+      return;
+    }
+
+    if (amountSent !== null) {
+      setTransferReceivedUSD(formatAutoAmount(amountSent - amountFee));
+    }
   };
 
   const handleDelete = async (tx: Transaction) => {
@@ -408,19 +508,74 @@ export default function Home() {
     BofA: getWalletBalance('BofA'),
   };
   const selectedWalletBalance = selectedWallet ? walletBalances[selectedWallet] : 0;
-  const transferSentAmount = parseSafeInputNumber(transferSentUSD);
-  const transferReceivedAmount = parseSafeInputNumber(transferReceivedUSD);
-  const transferFee = Math.max(0, transferSentAmount - transferReceivedAmount);
   const depositModalWallet = editingTx?.person || selectedWallet;
   const depositActionLabel = depositModalWallet === 'BofA' ? 'Enviar Dinheiro' : 'Comprar Dólar';
+  const walletSummaries = WALLETS.map(wallet => ({ wallet, balance: walletBalances[wallet] }));
 
-  const filteredTransactions = historyFilter === 'Total' 
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+  const startOfWeek = startOfDay - 6 * DAY_IN_MS;
+  const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const endOfCurrentMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
+  const startOfSelectedMonth = new Date(selYear, selMonth, 1).getTime();
+  const isSelectedCurrentMonth = selYear === now.getFullYear() && selMonth === now.getMonth();
+  const endOfSelectedMonth = isSelectedCurrentMonth
+    ? endOfDay
+    : new Date(selYear, selMonth + 1, 1).getTime();
+
+  const walletFilteredTransactions = historyFilter === 'Total' 
     ? transactions 
     : transactions.filter(t => t.person === historyFilter);
 
+  const filterByHistoryPeriod = (tx: Transaction) => {
+    if (historyPeriod === 'All') return true;
+
+    const time = new Date(tx.date).getTime();
+    if (Number.isNaN(time)) return false;
+
+    if (historyPeriod === 'Today') return time >= startOfDay && time < endOfDay;
+    if (historyPeriod === 'Week') return time >= startOfWeek && time < endOfDay;
+    return time >= startOfCurrentMonth && time < endOfCurrentMonth;
+  };
+
+  const historyTransactions = walletFilteredTransactions.filter(filterByHistoryPeriod);
+  const transferLookup = transactions.reduce<Record<string, Transaction[]>>((acc, tx) => {
+    if (!isTransferTransaction(tx)) return acc;
+    const groupId = getTransferGroupId(tx.id);
+    acc[groupId] = [...(acc[groupId] || []), tx];
+    return acc;
+  }, {});
+  const renderedTransferGroups = new Set<string>();
+  const historyItems: HistoryItem[] = historyTransactions.flatMap<HistoryItem>(tx => {
+    if (!isTransferTransaction(tx)) return [{ kind: 'transaction', tx }];
+
+    const groupId = getTransferGroupId(tx.id);
+    if (renderedTransferGroups.has(groupId)) return [];
+    renderedTransferGroups.add(groupId);
+
+    const transferGroup = transferLookup[groupId] || [tx];
+    const outTx = transferGroup.find(item => item.type === 'TransferOut');
+    const inTx = transferGroup.find(item => item.type === 'TransferIn');
+    const sourceWallet = outTx?.person || (isWalletId(inTx?.category) ? inTx.category : tx.person);
+    const sentAmount = outTx?.amountUSD || (tx.type === 'TransferOut' ? tx.amountUSD : inTx?.amountUSD || tx.amountUSD);
+    const receivedAmount = inTx?.amountUSD || (tx.type === 'TransferIn' ? tx.amountUSD : outTx?.amountUSD || tx.amountUSD);
+
+    return [{
+      kind: 'transfer',
+      id: groupId,
+      date: outTx?.date || inTx?.date || tx.date,
+      sourceWallet,
+      sentAmount,
+      receivedAmount,
+      fee: Math.max(0, sentAmount - receivedAmount),
+      referenceTx: outTx || inTx || tx,
+    }];
+  });
+
   // --- Analytics Calculations ---
   // Analytics apply only to the filtered view
-  const expenses = filteredTransactions.filter(t => t.type === 'Expense');
+  const expenses = walletFilteredTransactions.filter(t => t.type === 'Expense');
 
   const txYears = Array.from(new Set(transactions
     .map(t => {
@@ -432,18 +587,6 @@ export default function Home() {
   if (!availableYears.includes(new Date().getFullYear())) availableYears.push(new Date().getFullYear());
   if (!availableYears.includes(new Date().getFullYear() + 1)) availableYears.push(new Date().getFullYear() + 1);
   availableYears.sort((a, b) => a - b);
-
-  const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
-  const startOfWeek = startOfDay - 6 * DAY_IN_MS;
-
-  // Selected Month Logic
-  const startOfSelectedMonth = new Date(selYear, selMonth, 1).getTime();
-  const isSelectedCurrentMonth = selYear === now.getFullYear() && selMonth === now.getMonth();
-  const endOfSelectedMonth = isSelectedCurrentMonth
-    ? endOfDay
-    : new Date(selYear, selMonth + 1, 1).getTime();
 
   let spendToday = 0;
   let spendThisWeek = 0;
@@ -567,6 +710,19 @@ export default function Home() {
             </button>
           </div>
 
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            {walletSummaries.map(({ wallet, balance: walletBalance }) => (
+              <button
+                key={wallet}
+                onClick={() => setSelectedWallet(selectedWallet === wallet ? null : wallet)}
+                className={`min-w-0 rounded-lg border px-2.5 py-2 text-left transition-all ${selectedWallet === wallet ? 'border-slate-400 bg-white shadow-sm' : 'border-gray-200 bg-white/70 hover:bg-white'}`}
+              >
+                <p className="truncate text-[10px] font-bold uppercase tracking-wide text-gray-400">{wallet}</p>
+                <p className={`truncate text-sm font-black ${walletTextClass[wallet]}`}>${formatCurrency(walletBalance)}</p>
+              </button>
+            ))}
+          </div>
+
           {selectedWallet && (
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 animate-in fade-in slide-in-from-top-2">
               <div className="flex justify-between items-center mb-6">
@@ -610,66 +766,118 @@ export default function Home() {
         <div>
           <div className="flex justify-between items-end mb-4 px-1">
             <h2 className="text-lg font-bold text-gray-800">Histórico</h2>
-            <div className="flex flex-wrap justify-end bg-gray-200/50 p-1 rounded-lg">
-              <button 
-                onClick={() => setHistoryFilter('Total')} 
-                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Total' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                Total
-              </button>
-              <button 
-                onClick={() => setHistoryFilter('Daniel')} 
-                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Daniel' ? 'bg-indigo-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                Daniel
-              </button>
-              <button 
-                onClick={() => setHistoryFilter('Marília')} 
-                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Marília' ? 'bg-rose-100 text-rose-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                Marília
-              </button>
-              <button
-                onClick={() => setHistoryFilter('BofA')}
-                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'BofA' ? 'bg-blue-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                BofA
-              </button>
+            <div className="flex flex-col items-end gap-1.5">
+              <div className="flex flex-wrap justify-end bg-gray-200/50 p-1 rounded-lg">
+                <button
+                  onClick={() => setHistoryFilter('Total')}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Total' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  Total
+                </button>
+                <button
+                  onClick={() => setHistoryFilter('Daniel')}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Daniel' ? 'bg-indigo-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  Daniel
+                </button>
+                <button
+                  onClick={() => setHistoryFilter('Marília')}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Marília' ? 'bg-rose-100 text-rose-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  Marília
+                </button>
+                <button
+                  onClick={() => setHistoryFilter('BofA')}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'BofA' ? 'bg-blue-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  BofA
+                </button>
+              </div>
+              <div className="flex flex-wrap justify-end bg-gray-200/50 p-1 rounded-lg">
+                {[
+                  { value: 'All', label: 'Tudo' },
+                  { value: 'Today', label: 'Hoje' },
+                  { value: 'Week', label: 'Semana' },
+                  { value: 'Month', label: 'Mês' },
+                ].map(period => (
+                  <button
+                    key={period.value}
+                    onClick={() => setHistoryPeriod(period.value as HistoryPeriod)}
+                    className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyPeriod === period.value ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  >
+                    {period.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
-          {isLoading && filteredTransactions.length === 0 ? (
+          {isLoading && historyItems.length === 0 ? (
             <div className="space-y-3">
               {[1, 2, 3].map(i => (
                 <div key={i} className="animate-pulse bg-white p-4 rounded-2xl h-20 shadow-sm border border-gray-100"></div>
               ))}
             </div>
-          ) : filteredTransactions.length === 0 ? (
+          ) : historyItems.length === 0 ? (
             <div className="text-center p-8 bg-white rounded-2xl border border-dashed border-gray-300">
               <HandCoins className="w-12 h-12 text-gray-300 mx-auto mb-3" />
               <p className="text-gray-500 font-medium">Nenhum registro ainda nesta carteira.</p>
             </div>
           ) : (
             <div className="space-y-3">
-              {filteredTransactions.map(tx => {
+              {historyItems.map(item => {
+                if (item.kind === 'transfer') {
+                  const isItemDeleting = Boolean(isDeleting && getTransferGroupId(isDeleting) === item.id);
+
+                  return (
+                    <div key={`transfer-${item.id}`} className={`bg-white p-4 rounded-2xl shadow-sm border border-blue-100 flex items-center justify-between gap-3 transition-all ${isItemDeleting ? 'opacity-50 scale-95' : 'hover:border-blue-200'}`}>
+                      <div className="flex items-start gap-4 min-w-0">
+                        <div className="shrink-0 w-12 h-12 rounded-full flex items-center justify-center bg-blue-50">
+                          <Send className="w-6 h-6 text-blue-600" />
+                        </div>
+                        <div className="min-w-0 pr-2">
+                          <p className="font-bold text-gray-800 truncate">Transferência para BofA</p>
+                          <div className="flex flex-col items-start gap-1 mt-2">
+                            <p className="font-black text-[17px] text-blue-700 leading-none">
+                              ${formatCurrency(item.sentAmount)} -&gt; ${formatCurrency(item.receivedAmount)}
+                            </p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                                {new Date(item.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                              </span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${walletBadgeClass[item.sourceWallet]}`}>
+                                {item.sourceWallet}
+                              </span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${walletBadgeClass.BofA}`}>
+                                BofA
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">
+                              Fee ${formatCurrency(item.fee)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1.5 shrink-0">
+                        <button
+                          onClick={() => handleDelete(item.referenceTx)}
+                          disabled={isItemDeleting || isLoading}
+                          className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors disabled:opacity-50"
+                          title="Apagar transferência"
+                        >
+                          {isItemDeleting ? <RefreshCw className="w-4 h-4 animate-spin text-red-400" /> : <Trash2 className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                const tx = item.tx;
                 const isDeposit = tx.type === 'Deposit';
                 const isExpense = tx.type === 'Expense';
-                const isTransfer = isTransferTransaction(tx);
                 const isIncoming = isIncomingTransaction(tx);
-                const relatedTransfer = isTransfer
-                  ? transactions.find(item => isTransferTransaction(item) && getTransferGroupId(item.id) === getTransferGroupId(tx.id) && item.id !== tx.id)
-                  : undefined;
-                const fee = tx.type === 'TransferOut' && relatedTransfer
-                  ? Math.max(0, tx.amountUSD - relatedTransfer.amountUSD)
-                  : 0;
-                const isItemDeleting = isDeleting === tx.id || Boolean(isDeleting && isTransfer && getTransferGroupId(isDeleting) === getTransferGroupId(tx.id));
-                const transactionTitle = isDeposit
-                  ? 'Compra de Dólar'
-                  : tx.type === 'TransferOut'
-                    ? 'Transferência para BofA'
-                    : tx.type === 'TransferIn'
-                      ? tx.description || 'Transferência recebida'
-                      : tx.description;
+                const isItemDeleting = isDeleting === tx.id;
+                const transactionTitle = isDeposit ? 'Compra de Dólar' : tx.description;
                 const canEdit = isDeposit || isExpense;
 
                 return (
@@ -697,16 +905,6 @@ export default function Home() {
                           {isExpense && tx.category && (
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider mt-0.5 ${getCategoryColorClass(tx.category)}`}>
                               {tx.category}
-                            </span>
-                          )}
-                          {tx.type === 'TransferOut' && relatedTransfer && (
-                            <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">
-                              Chega ${formatCurrency(relatedTransfer.amountUSD)} | Fee ${formatCurrency(fee)}
-                            </span>
-                          )}
-                          {tx.type === 'TransferIn' && tx.category && (
-                            <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">
-                              Origem {tx.category}
                             </span>
                           )}
                         </div>
@@ -907,7 +1105,7 @@ export default function Home() {
                     inputMode="decimal"
                     required
                     value={transferSentUSD}
-                    onChange={e => setTransferSentUSD(e.target.value)}
+                    onChange={e => handleTransferSentChange(e.target.value)}
                     className="w-full h-14 bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 pl-8 text-lg font-bold focus:border-blue-500 focus:bg-white outline-none transition-all"
                     placeholder="0.00"
                   />
@@ -923,16 +1121,40 @@ export default function Home() {
                     inputMode="decimal"
                     required
                     value={transferReceivedUSD}
-                    onChange={e => setTransferReceivedUSD(e.target.value)}
+                    onChange={e => handleTransferReceivedChange(e.target.value)}
                     className="w-full h-14 bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 pl-8 text-lg font-bold focus:border-blue-500 focus:bg-white outline-none transition-all"
                     placeholder="0.00"
                   />
                 </div>
               </div>
 
-              <div className="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-xl px-4 py-3">
-                <span className="text-sm font-bold text-gray-500">Fee</span>
-                <span className="text-lg font-black text-blue-900">${formatCurrency(transferFee)}</span>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Fee (USD)</label>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    required
+                    value={transferFeeUSD}
+                    onChange={e => handleTransferFeeChange(e.target.value)}
+                    className="w-full h-14 bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 pl-8 text-lg font-bold focus:border-blue-500 focus:bg-white outline-none transition-all"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                  <Calendar className="w-4 h-4 text-blue-500" /> Data da transferência
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={transferDate}
+                  onChange={e => setTransferDate(e.target.value)}
+                  className="w-full h-14 appearance-none bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold leading-none focus:border-blue-500 focus:bg-white outline-none transition-all"
+                />
               </div>
 
               <div className="flex gap-2 pt-5">
@@ -942,6 +1164,9 @@ export default function Home() {
                     setShowTransferModal(false);
                     setTransferSentUSD('');
                     setTransferReceivedUSD('');
+                    setTransferFeeUSD('');
+                    setTransferCalcMode(null);
+                    setTransferDate(getTodayDateInput());
                   }}
                   className="flex-1 py-3.5 text-gray-500 font-bold hover:bg-gray-100 rounded-xl transition-colors"
                 >
