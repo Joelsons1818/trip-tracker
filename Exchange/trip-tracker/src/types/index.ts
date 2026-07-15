@@ -1,8 +1,11 @@
+export type WalletId = 'Daniel' | 'Marília' | 'BofA';
+export type TransactionType = 'Deposit' | 'Expense' | 'TransferOut' | 'TransferIn';
+
 export interface Transaction {
     id: string;
     date: string;
-    type: 'Deposit' | 'Expense';
-    person: 'Daniel' | 'Marília';
+    type: TransactionType;
+    person: WalletId;
     amountUSD: number;
     costBRL?: number;
     description?: string;

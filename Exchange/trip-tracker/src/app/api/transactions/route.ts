@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getGoogleSheets } from '@/lib/sheets';
-import { Transaction } from '@/types';
+import type { sheets_v4 } from 'googleapis';
+import type { Transaction } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
-async function getFirstSheetName(sheets: any, sheetId: string) {
+type SheetRow = Array<string | number | undefined>;
+
+async function getFirstSheetName(sheets: sheets_v4.Sheets, sheetId: string) {
     const response = await sheets.spreadsheets.get({
         spreadsheetId: sheetId,
     });
@@ -30,7 +33,7 @@ const parseNumber = (val: string | number | undefined | null) => {
     }
 };
 
-const parseDate = (val: string | number) => {
+const parseDate = (val: string | number | undefined | null) => {
     if (!val) return new Date().toISOString();
     if (typeof val === 'number') {
         return new Date(Math.round((val - 25569) * 86400 * 1000)).toISOString();
@@ -76,25 +79,25 @@ export async function GET() {
             range: range,
         });
 
-        const rows = response.data.values;
+        const rows = response.data.values as SheetRow[] | undefined;
         if (!rows || rows.length === 0) {
             return NextResponse.json({ transactions: [] });
         }
 
-        const transactions: Transaction[] = rows.map((row: any[], index: number) => ({
-            id: row[0],
+        const transactions: Transaction[] = rows.map((row, index) => ({
+            id: String(row[0] || ''),
             date: parseDate(row[1]),
-            type: row[2] as 'Deposit' | 'Expense',
-            person: row[3] as 'Daniel' | 'Marília',
+            type: row[2] as Transaction['type'],
+            person: row[3] as Transaction['person'],
             amountUSD: parseNumber(row[4]),
             costBRL: row[5] ? parseNumber(row[5]) : undefined,
-            description: row[6] || undefined,
-            category: row[7] || undefined,
+            description: row[6] ? String(row[6]) : undefined,
+            category: row[7] ? String(row[7]) : undefined,
             rowIndex: index + 2,
         }));
 
         return NextResponse.json({ transactions: transactions.reverse() });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Error fetching transactions:', error);
         return NextResponse.json({ error: 'Failed to fetch transactions' }, { status: 500 });
     }
@@ -102,7 +105,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
     try {
-        const body: Transaction = await request.json();
+        const body: Transaction | Transaction[] = await request.json();
+        const transactions = Array.isArray(body) ? body : [body];
         const sheets = await getGoogleSheets();
         const sheetId = process.env.GOOGLE_SHEET_ID;
 
@@ -118,23 +122,21 @@ export async function POST(request: Request) {
             range: range,
             valueInputOption: 'USER_ENTERED',
             requestBody: {
-                values: [
-                    [
-                        body.id,
-                        body.date,
-                        body.type,
-                        body.person,
-                        body.amountUSD,
-                        body.costBRL || '',
-                        body.description || '',
-                        body.category || ''
-                    ]
-                ],
+                values: transactions.map(transaction => [
+                    transaction.id,
+                    transaction.date,
+                    transaction.type,
+                    transaction.person,
+                    transaction.amountUSD,
+                    transaction.costBRL || '',
+                    transaction.description || '',
+                    transaction.category || ''
+                ]),
             },
         });
 
         return NextResponse.json({ success: true, transaction: body });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Error creating transaction:', error);
         return NextResponse.json({ error: 'Failed to create transaction' }, { status: 500 });
     }
@@ -182,7 +184,7 @@ export async function DELETE(request: Request) {
         });
 
         return NextResponse.json({ success: true });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Error deleting transaction:', error);
         return NextResponse.json({ error: 'Failed to delete transaction' }, { status: 500 });
     }
@@ -221,7 +223,7 @@ export async function PUT(request: Request) {
         });
 
         return NextResponse.json({ success: true, transaction: body });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Error updating transaction:', error);
         return NextResponse.json({ error: 'Failed to update transaction' }, { status: 500 });
     }

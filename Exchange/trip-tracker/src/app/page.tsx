@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Transaction, Category } from '@/types';
-import { PlusCircle, MinusCircle, Wallet, ArrowUpRight, ArrowDownRight, RefreshCw, HandCoins, Trash2, BarChart2, X, Calendar, ChevronDown, Settings, Edit3, Tag } from 'lucide-react';
+import type { Transaction, Category, WalletId } from '@/types';
+import { PlusCircle, MinusCircle, Wallet, ArrowUpRight, ArrowDownRight, RefreshCw, HandCoins, Trash2, BarChart2, X, Calendar, ChevronDown, Settings, Edit3, Tag, Send } from 'lucide-react';
 
 const parseInputNumber = (val: string) => {
     if (!val) return 0;
@@ -18,6 +18,11 @@ const parseInputNumber = (val: string) => {
     } else {
          return parseFloat(str);
     }
+};
+
+const parseSafeInputNumber = (val: string) => {
+  const parsed = parseInputNumber(val);
+  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 const formatCurrency = (val: number) => {
@@ -65,6 +70,23 @@ const MONTHS = [
   { value: 11, label: 'Dez' },
 ];
 
+const walletTextClass: Record<WalletId, string> = {
+  Daniel: 'text-indigo-900',
+  Marília: 'text-rose-800',
+  BofA: 'text-blue-900',
+};
+
+const walletBadgeClass: Record<WalletId, string> = {
+  Daniel: 'bg-blue-50 border border-blue-200 text-blue-700 shadow-sm',
+  Marília: 'bg-yellow-50 border border-yellow-200 text-yellow-700 shadow-sm',
+  BofA: 'bg-white border border-blue-300 text-blue-800 shadow-sm',
+};
+
+const isIncomingTransaction = (tx: Transaction) => tx.type === 'Deposit' || tx.type === 'TransferIn';
+const isOutgoingTransaction = (tx: Transaction) => tx.type === 'Expense' || tx.type === 'TransferOut';
+const isTransferTransaction = (tx: Transaction) => tx.type === 'TransferIn' || tx.type === 'TransferOut';
+const getTransferGroupId = (id: string) => id.replace(/-(in|out)$/, '');
+
 const getCategoryColorClass = (category: string) => {
   const pastelColors = [
     'bg-slate-50 text-slate-600 border-slate-200',
@@ -99,15 +121,18 @@ export default function Home() {
   // Modals state
   const [showAddModal, setShowAddModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [showTransferModal, setShowTransferModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [showCategorySettings, setShowCategorySettings] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
-  // New Wise State
-  const [selectedWise, setSelectedWise] = useState<'Daniel' | 'Marília' | null>(null);
-  const [historyFilter, setHistoryFilter] = useState<'Total' | 'Daniel' | 'Marília'>('Total');
+  // Wallet state
+  const [selectedWallet, setSelectedWallet] = useState<WalletId | null>(null);
+  const [historyFilter, setHistoryFilter] = useState<'Total' | WalletId>('Total');
   const [amountUSD, setAmountUSD] = useState('');
   const [costBRL, setCostBRL] = useState('');
+  const [transferSentUSD, setTransferSentUSD] = useState('');
+  const [transferReceivedUSD, setTransferReceivedUSD] = useState('');
   const [description, setDescription] = useState('');
   const [categoryName, setCategoryName] = useState('');
   const [transactionDate, setTransactionDate] = useState(() => getTodayDateInput());
@@ -167,7 +192,7 @@ export default function Home() {
       id: editingTx ? editingTx.id : crypto.randomUUID(),
       date: editingTx ? editingTx.date : new Date().toISOString(),
       type: 'Deposit',
-      person: editingTx ? editingTx.person : (selectedWise || 'Daniel'),
+      person: editingTx ? editingTx.person : (selectedWallet || 'Daniel'),
       amountUSD: parseInputNumber(amountUSD),
       costBRL: parseInputNumber(costBRL),
       rowIndex: editingTx ? editingTx.rowIndex : undefined
@@ -200,7 +225,7 @@ export default function Home() {
       id: editingTx ? editingTx.id : crypto.randomUUID(),
       date: dateInputToIso(transactionDate),
       type: 'Expense',
-      person: editingTx ? editingTx.person : (selectedWise || 'Daniel'),
+      person: editingTx ? editingTx.person : (selectedWallet || 'Daniel'),
       amountUSD: parseInputNumber(amountUSD),
       description,
       category: categoryName,
@@ -222,7 +247,63 @@ export default function Home() {
     fetchTransactions();
   };
 
+  const handleTransferToBofA = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedWallet || selectedWallet === 'BofA') return;
+    if (!transferSentUSD || !transferReceivedUSD) return;
+
+    const amountSent = parseSafeInputNumber(transferSentUSD);
+    const amountReceived = parseSafeInputNumber(transferReceivedUSD);
+
+    if (amountSent <= 0 || amountReceived <= 0 || amountReceived > amountSent) {
+      alert('Confira os valores da transferência. O valor que chega deve ser menor ou igual ao valor enviado.');
+      return;
+    }
+
+    setShowTransferModal(false);
+    setIsLoading(true);
+
+    const transferId = crypto.randomUUID();
+    const transferDate = new Date().toISOString();
+    const payload: Transaction[] = [
+      {
+        id: `${transferId}-out`,
+        date: transferDate,
+        type: 'TransferOut',
+        person: selectedWallet,
+        amountUSD: amountSent,
+        description: 'Transferência para BofA',
+        category: 'BofA',
+      },
+      {
+        id: `${transferId}-in`,
+        date: transferDate,
+        type: 'TransferIn',
+        person: 'BofA',
+        amountUSD: amountReceived,
+        description: `Transferência de ${selectedWallet}`,
+        category: selectedWallet,
+      },
+    ];
+
+    setTransferSentUSD('');
+    setTransferReceivedUSD('');
+
+    await fetch('/api/transactions', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    fetchTransactions();
+  };
+
   const openEditModal = (tx: Transaction) => {
+    if (isTransferTransaction(tx)) {
+      alert('Para corrigir uma transferência, apague a transferência e registre novamente.');
+      return;
+    }
+
     setEditingTx(tx);
     setAmountUSD(tx.amountUSD.toString());
     if (tx.type === 'Deposit') {
@@ -236,6 +317,13 @@ export default function Home() {
     }
   };
 
+  const openNewDepositModal = () => {
+    setEditingTx(null);
+    setAmountUSD('');
+    setCostBRL('');
+    setShowAddModal(true);
+  };
+
   const openNewExpenseModal = () => {
     setEditingTx(null);
     setAmountUSD('');
@@ -245,18 +333,34 @@ export default function Home() {
     setShowExpenseModal(true);
   };
 
+  const openTransferModal = () => {
+    setEditingTx(null);
+    setTransferSentUSD('');
+    setTransferReceivedUSD('');
+    setShowTransferModal(true);
+  };
+
   const handleDelete = async (tx: Transaction) => {
     if (!tx.rowIndex) return;
 
-    if (!confirm('Tem certeza que deseja apagar esta transação da planilha?')) {
+    const transferGroupId = isTransferTransaction(tx) ? getTransferGroupId(tx.id) : null;
+    const transactionsToDelete = transferGroupId
+      ? transactions
+          .filter(item => isTransferTransaction(item) && getTransferGroupId(item.id) === transferGroupId && item.rowIndex)
+          .sort((a, b) => (b.rowIndex || 0) - (a.rowIndex || 0))
+      : [tx];
+
+    if (!confirm(transferGroupId ? 'Apagar esta transferência da planilha?' : 'Tem certeza que deseja apagar esta transação da planilha?')) {
       return;
     }
 
     setIsDeleting(tx.id);
     try {
-      await fetch(`/api/transactions?rowIndex=${tx.rowIndex}`, {
-        method: 'DELETE',
-      });
+      for (const item of transactionsToDelete) {
+        await fetch(`/api/transactions?rowIndex=${item.rowIndex}`, {
+          method: 'DELETE',
+        });
+      }
       await fetchTransactions();
     } catch (error) {
       console.error('Failed to delete', error);
@@ -266,8 +370,8 @@ export default function Home() {
     }
   };
 
-  const totalDeposits = transactions.filter(t => t.type === 'Deposit').reduce((acc, t) => acc + t.amountUSD, 0);
-  const totalExpenses = transactions.filter(t => t.type === 'Expense').reduce((acc, t) => acc + t.amountUSD, 0);
+  const totalDeposits = transactions.filter(isIncomingTransaction).reduce((acc, t) => acc + t.amountUSD, 0);
+  const totalExpenses = transactions.filter(isOutgoingTransaction).reduce((acc, t) => acc + t.amountUSD, 0);
   const balance = totalDeposits - totalExpenses;
 
   const handleCreateCategory = async (e: React.FormEvent) => {
@@ -293,13 +397,22 @@ export default function Home() {
     setIsLoading(false);
   };
 
-  const getPersonBalance = (p: 'Daniel'|'Marília') => {
-    const deps = transactions.filter(t => t.type === 'Deposit' && t.person === p).reduce((acc, t) => acc + t.amountUSD, 0);
-    const exps = transactions.filter(t => t.type === 'Expense' && t.person === p).reduce((acc, t) => acc + t.amountUSD, 0);
+  const getWalletBalance = (wallet: WalletId) => {
+    const deps = transactions.filter(t => isIncomingTransaction(t) && t.person === wallet).reduce((acc, t) => acc + t.amountUSD, 0);
+    const exps = transactions.filter(t => isOutgoingTransaction(t) && t.person === wallet).reduce((acc, t) => acc + t.amountUSD, 0);
     return deps - exps;
   };
-  const danielBalance = getPersonBalance('Daniel');
-  const mariliaBalance = getPersonBalance('Marília');
+  const walletBalances: Record<WalletId, number> = {
+    Daniel: getWalletBalance('Daniel'),
+    Marília: getWalletBalance('Marília'),
+    BofA: getWalletBalance('BofA'),
+  };
+  const selectedWalletBalance = selectedWallet ? walletBalances[selectedWallet] : 0;
+  const transferSentAmount = parseSafeInputNumber(transferSentUSD);
+  const transferReceivedAmount = parseSafeInputNumber(transferReceivedUSD);
+  const transferFee = Math.max(0, transferSentAmount - transferReceivedAmount);
+  const depositModalWallet = editingTx?.person || selectedWallet;
+  const depositActionLabel = depositModalWallet === 'BofA' ? 'Enviar Dinheiro' : 'Comprar Dólar';
 
   const filteredTransactions = historyFilter === 'Total' 
     ? transactions 
@@ -417,7 +530,7 @@ export default function Home() {
               </div>
               <div className="w-px bg-white/10"></div>
               <div className="flex-1">
-                <p className="text-xs text-rose-300 font-medium flex items-center gap-1 mb-1"><ArrowUpRight className="w-3 h-3" /> Gastos</p>
+                <p className="text-xs text-rose-300 font-medium flex items-center gap-1 mb-1"><ArrowUpRight className="w-3 h-3" /> Saídas</p>
                 <p className="font-semibold">${formatCurrency(totalExpenses)}</p>
               </div>
             </div>
@@ -428,41 +541,49 @@ export default function Home() {
       <main className="max-w-md mx-auto px-4">
         {/* NEW WALLETS SECTION */}
         <div className="mb-8">
-          <h2 className="text-lg font-bold text-gray-800 mb-4 px-1">Carteiras Wise</h2>
+          <h2 className="text-lg font-bold text-gray-800 mb-4 px-1">Carteiras</h2>
           <div className="grid grid-cols-2 gap-3 mb-4">
             <button
-              onClick={() => setSelectedWise(selectedWise === 'Daniel' ? null : 'Daniel')}
-              className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 ${selectedWise === 'Daniel' ? 'bg-indigo-900 border-indigo-700 text-white shadow-md scale-100' : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300 hover:bg-indigo-50/50'}`}
+              onClick={() => setSelectedWallet(selectedWallet === 'Daniel' ? null : 'Daniel')}
+              className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 ${selectedWallet === 'Daniel' ? 'bg-indigo-900 border-indigo-700 text-white shadow-md scale-100' : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300 hover:bg-indigo-50/50'}`}
             >
               <Wallet className="w-6 h-6" />
               <span className="font-bold">Wise Daniel</span>
             </button>
             <button
-              onClick={() => setSelectedWise(selectedWise === 'Marília' ? null : 'Marília')}
-              className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 ${selectedWise === 'Marília' ? 'bg-rose-100 border-rose-300 text-rose-800 shadow-md scale-100' : 'bg-white border-gray-200 text-gray-600 hover:border-rose-300 hover:bg-rose-50/50'}`}
+              onClick={() => setSelectedWallet(selectedWallet === 'Marília' ? null : 'Marília')}
+              className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 ${selectedWallet === 'Marília' ? 'bg-rose-100 border-rose-300 text-rose-800 shadow-md scale-100' : 'bg-white border-gray-200 text-gray-600 hover:border-rose-300 hover:bg-rose-50/50'}`}
             >
               <Wallet className="w-6 h-6" />
               <span className="font-bold">Wise Marília</span>
             </button>
+            <button
+              onClick={() => setSelectedWallet(selectedWallet === 'BofA' ? null : 'BofA')}
+              className={`col-span-2 p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 overflow-hidden relative ${selectedWallet === 'BofA' ? 'bg-blue-900 border-red-500 text-white shadow-md scale-100' : 'bg-white border-blue-200 text-blue-800 hover:border-red-300 hover:bg-blue-50/50'}`}
+            >
+              <span className="absolute top-0 left-0 h-1.5 w-full bg-gradient-to-r from-red-500 via-white to-blue-600"></span>
+              <Wallet className="w-6 h-6" />
+              <span className="font-bold">BofA</span>
+            </button>
           </div>
 
-          {selectedWise && (
+          {selectedWallet && (
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 animate-in fade-in slide-in-from-top-2">
               <div className="flex justify-between items-center mb-6">
                 <div>
                   <p className="text-sm text-gray-500 font-bold uppercase tracking-wide">Saldo Disponível</p>
-                  <p className={`text-3xl font-black ${selectedWise === 'Daniel' ? 'text-indigo-900' : 'text-rose-800'}`}>
-                    ${formatCurrency(selectedWise === 'Daniel' ? danielBalance : mariliaBalance)}
+                  <p className={`text-3xl font-black ${walletTextClass[selectedWallet]}`}>
+                    ${formatCurrency(selectedWalletBalance)}
                   </p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <button
-                  onClick={() => setShowAddModal(true)}
+                  onClick={openNewDepositModal}
                   className="bg-emerald-50 text-emerald-600 font-bold p-3 rounded-xl border border-emerald-100 hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2"
                 >
                   <PlusCircle className="w-5 h-5" />
-                  Comprar Dólar
+                  {selectedWallet === 'BofA' ? 'Enviar Dinheiro' : 'Comprar Dólar'}
                 </button>
                 <button
                   onClick={openNewExpenseModal}
@@ -471,6 +592,15 @@ export default function Home() {
                   <MinusCircle className="w-5 h-5" />
                   Registrar Gasto
                 </button>
+                {selectedWallet !== 'BofA' && (
+                  <button
+                    onClick={openTransferModal}
+                    className="col-span-2 bg-blue-50 text-blue-700 font-bold p-3 rounded-xl border border-blue-100 hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Send className="w-5 h-5" />
+                    Transferir p/ BofA
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -480,24 +610,30 @@ export default function Home() {
         <div>
           <div className="flex justify-between items-end mb-4 px-1">
             <h2 className="text-lg font-bold text-gray-800">Histórico</h2>
-            <div className="flex bg-gray-200/50 p-1 rounded-lg">
+            <div className="flex flex-wrap justify-end bg-gray-200/50 p-1 rounded-lg">
               <button 
                 onClick={() => setHistoryFilter('Total')} 
-                className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Total' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Total' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
               >
                 Total
               </button>
               <button 
                 onClick={() => setHistoryFilter('Daniel')} 
-                className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Daniel' ? 'bg-indigo-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Daniel' ? 'bg-indigo-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
               >
                 Daniel
               </button>
               <button 
                 onClick={() => setHistoryFilter('Marília')} 
-                className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Marília' ? 'bg-rose-100 text-rose-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Marília' ? 'bg-rose-100 text-rose-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
               >
                 Marília
+              </button>
+              <button
+                onClick={() => setHistoryFilter('BofA')}
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'BofA' ? 'bg-blue-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                BofA
               </button>
             </div>
           </div>
@@ -516,55 +652,67 @@ export default function Home() {
           ) : (
             <div className="space-y-3">
               {filteredTransactions.map(tx => {
-                const isDaniel = tx.person === 'Daniel';
                 const isDeposit = tx.type === 'Deposit';
-                const isItemDeleting = isDeleting === tx.id;
-
-                // Color Themes (High contrast)
-                const personBg = isDaniel
-                  ? 'bg-blue-50 border border-blue-200 text-blue-700 shadow-sm'
-                  : 'bg-yellow-50 border border-yellow-200 text-yellow-700 shadow-sm';
+                const isExpense = tx.type === 'Expense';
+                const isTransfer = isTransferTransaction(tx);
+                const isIncoming = isIncomingTransaction(tx);
+                const relatedTransfer = isTransfer
+                  ? transactions.find(item => isTransferTransaction(item) && getTransferGroupId(item.id) === getTransferGroupId(tx.id) && item.id !== tx.id)
+                  : undefined;
+                const fee = tx.type === 'TransferOut' && relatedTransfer
+                  ? Math.max(0, tx.amountUSD - relatedTransfer.amountUSD)
+                  : 0;
+                const isItemDeleting = isDeleting === tx.id || Boolean(isDeleting && isTransfer && getTransferGroupId(isDeleting) === getTransferGroupId(tx.id));
+                const transactionTitle = isDeposit
+                  ? 'Compra de Dólar'
+                  : tx.type === 'TransferOut'
+                    ? 'Transferência para BofA'
+                    : tx.type === 'TransferIn'
+                      ? tx.description || 'Transferência recebida'
+                      : tx.description;
+                const canEdit = isDeposit || isExpense;
 
                 return (
                   <div key={tx.id} className={`bg-white p-4 rounded-2xl shadow-sm border border-gray-200 flex items-center justify-between gap-3 transition-all ${isItemDeleting ? 'opacity-50 scale-95' : 'hover:border-gray-300'}`}>
                     <div className="flex items-start gap-4 min-w-0">
-                      <div className={`shrink-0 w-12 h-12 rounded-full flex items-center justify-center ${isDeposit ? 'bg-emerald-100' : 'bg-red-50'}`}>
-                        {isDeposit ? <ArrowDownRight className="w-6 h-6 text-emerald-600" /> : <ArrowUpRight className="w-6 h-6 text-rose-500" />}
+                      <div className={`shrink-0 w-12 h-12 rounded-full flex items-center justify-center ${isIncoming ? 'bg-emerald-100' : 'bg-red-50'}`}>
+                        {isIncoming ? <ArrowDownRight className="w-6 h-6 text-emerald-600" /> : <ArrowUpRight className="w-6 h-6 text-rose-500" />}
                       </div>
                       <div className="min-w-0 pr-2">
-                        <p className="font-bold text-gray-800 truncate">{isDeposit ? 'Compra de Dólar' : tx.description}</p>
-                        {isDeposit ? (
-                          <div className="flex flex-col items-start gap-1 mt-1">
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${personBg}`}>
+                        <p className="font-bold text-gray-800 truncate">{transactionTitle}</p>
+                        <div className="flex flex-col items-start gap-1 mt-2">
+                          {!isDeposit && (
+                            <p className={`font-black text-[17px] leading-none ${isIncoming ? 'text-emerald-500' : 'text-rose-600'}`}>
+                              {isIncoming ? '+' : '-'}${formatCurrency(tx.amountUSD)}
+                            </p>
+                          )}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                              {new Date(tx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                            </span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${walletBadgeClass[tx.person]}`}>
                               {tx.person}
                             </span>
                           </div>
-                        ) : (
-                          <div className="flex flex-col items-start gap-1 mt-2">
-                            <p className="font-black text-[17px] text-rose-600 leading-none">-${formatCurrency(tx.amountUSD)}</p>
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-                                {new Date(tx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
-                              </span>
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${personBg}`}>
-                                {tx.person}
-                              </span>
-                            </div>
-                            {tx.category && (
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider mt-0.5 ${getCategoryColorClass(tx.category)}`}>
-                                {tx.category}
-                              </span>
-                            )}
-                          </div>
-                        )}
+                          {isExpense && tx.category && (
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider mt-0.5 ${getCategoryColorClass(tx.category)}`}>
+                              {tx.category}
+                            </span>
+                          )}
+                          {tx.type === 'TransferOut' && relatedTransfer && (
+                            <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">
+                              Chega ${formatCurrency(relatedTransfer.amountUSD)} | Fee ${formatCurrency(fee)}
+                            </span>
+                          )}
+                          {tx.type === 'TransferIn' && tx.category && (
+                            <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">
+                              Origem {tx.category}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <div className="flex flex-col items-end gap-1.5 shrink-0">
-                      {isDeposit && (
-                        <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-                          {new Date(tx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
-                        </span>
-                      )}
                       <div className="flex items-center gap-3">
                         {isDeposit && (
                           <div className="text-right">
@@ -576,14 +724,16 @@ export default function Home() {
                             )}
                           </div>
                         )}
-                        <button
-                          onClick={() => openEditModal(tx)}
-                          disabled={isItemDeleting || isLoading}
-                          className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors disabled:opacity-50"
-                          title="Editar transação"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
+                        {canEdit && (
+                          <button
+                            onClick={() => openEditModal(tx)}
+                            disabled={isItemDeleting || isLoading}
+                            className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors disabled:opacity-50"
+                            title="Editar transação"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                        )}
                         <button
                           onClick={() => handleDelete(tx)}
                           disabled={isItemDeleting || isLoading}
@@ -607,12 +757,12 @@ export default function Home() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm transition-opacity">
           <div className="bg-white rounded-[2rem] w-full max-w-sm p-6 shadow-2xl">
             <h3 className="text-xl font-bold mb-5 flex items-center gap-2">
-              {showAddModal ? <><PlusCircle className="text-emerald-500" /> {editingTx ? 'Editar Dólar' : 'Comprar Dólar'}</> : <><MinusCircle className="text-rose-500" /> {editingTx ? 'Editar Gasto' : 'Registrar Gasto'}</>}
+              {showAddModal ? <><PlusCircle className="text-emerald-500" /> {editingTx ? 'Editar Dólar' : depositActionLabel}</> : <><MinusCircle className="text-rose-500" /> {editingTx ? 'Editar Gasto' : 'Registrar Gasto'}</>}
             </h3>
 
             <form onSubmit={showAddModal ? handleDeposit : handleExpense} className="space-y-4">
 
-              {/* A Pessoa (Quem) agora é associada automaticamente com a carteira Wise selecionada */}
+              {/* A pessoa/conta é associada automaticamente com a carteira selecionada */}
 
               {showAddModal && (
                 <>
@@ -729,6 +879,81 @@ export default function Home() {
                 </button>
               </div>
 
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showTransferModal && selectedWallet && selectedWallet !== 'BofA' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm transition-opacity">
+          <div className="bg-white rounded-[2rem] w-full max-w-sm p-6 shadow-2xl">
+            <h3 className="text-xl font-bold mb-5 flex items-center gap-2">
+              <Send className="text-blue-500" /> Transferir para BofA
+            </h3>
+
+            <form onSubmit={handleTransferToBofA} className="space-y-4">
+              <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
+                <p className="text-xs text-blue-500 font-bold uppercase tracking-wide mb-1">Origem</p>
+                <p className="font-black text-blue-900">Wise {selectedWallet}</p>
+                <p className="text-sm text-blue-600 font-semibold mt-1">${formatCurrency(walletBalances[selectedWallet])} disponível</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Valor enviado (USD)</label>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    required
+                    value={transferSentUSD}
+                    onChange={e => setTransferSentUSD(e.target.value)}
+                    className="w-full h-14 bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 pl-8 text-lg font-bold focus:border-blue-500 focus:bg-white outline-none transition-all"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Valor que chega (USD)</label>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    required
+                    value={transferReceivedUSD}
+                    onChange={e => setTransferReceivedUSD(e.target.value)}
+                    className="w-full h-14 bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 pl-8 text-lg font-bold focus:border-blue-500 focus:bg-white outline-none transition-all"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-xl px-4 py-3">
+                <span className="text-sm font-bold text-gray-500">Fee</span>
+                <span className="text-lg font-black text-blue-900">${formatCurrency(transferFee)}</span>
+              </div>
+
+              <div className="flex gap-2 pt-5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowTransferModal(false);
+                    setTransferSentUSD('');
+                    setTransferReceivedUSD('');
+                  }}
+                  className="flex-1 py-3.5 text-gray-500 font-bold hover:bg-gray-100 rounded-xl transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3.5 text-white font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 bg-blue-600 hover:bg-blue-700 shadow-blue-200"
+                >
+                  Transferir
+                </button>
+              </div>
             </form>
           </div>
         </div>
