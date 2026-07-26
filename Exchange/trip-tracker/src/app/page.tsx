@@ -2,6 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import type { Transaction, Category, WalletId } from '@/types';
+import {
+  compareOptionalDatesNewestFirst,
+  compareTransactionsNewestFirst,
+  getTransactionTimestamp,
+} from '@/lib/transactions';
 import { PlusCircle, MinusCircle, Wallet, ArrowUpRight, ArrowDownRight, RefreshCw, HandCoins, Trash2, BarChart2, X, Calendar, ChevronDown, Settings, Edit3, Tag, Send } from 'lucide-react';
 
 const parseInputNumber = (val: string) => {
@@ -40,7 +45,9 @@ const formatCurrency = (val: number) => {
   return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
-const formatDateForInput = (dateValue: string) => {
+const formatDateForInput = (dateValue?: string) => {
+  if (!dateValue) return '';
+
   const date = new Date(dateValue);
   if (Number.isNaN(date.getTime())) return '';
 
@@ -51,9 +58,19 @@ const formatDateForInput = (dateValue: string) => {
   return `${year}-${month}-${day}`;
 };
 
-const dateInputToIso = (dateValue: string) => `${dateValue}T12:00:00.000Z`;
+const dateInputToIso = (dateValue: string) => dateValue ? `${dateValue}T12:00:00.000Z` : undefined;
 
 const getTodayDateInput = () => formatDateForInput(new Date().toISOString());
+
+const formatDisplayDate = (
+  dateValue?: string,
+  options: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short' },
+) => {
+  const timestamp = getTransactionTimestamp(dateValue);
+  if (timestamp === null) return 'Sem data';
+
+  return new Date(timestamp).toLocaleDateString('pt-BR', options);
+};
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
@@ -91,7 +108,7 @@ type HistoryItem =
   | {
       kind: 'transfer';
       id: string;
-      date: string;
+      date?: string;
       sourceWallet: WalletId;
       sentAmount: number;
       receivedAmount: number;
@@ -232,7 +249,7 @@ export default function Home() {
     setTransferFeeUSD('');
     setTransferCalcMode(null);
     setTransferSourceWallet(null);
-    setTransferDate(getTodayDateInput());
+    setTransferDate('');
     setEditingTransfer(null);
   };
 
@@ -245,14 +262,17 @@ export default function Home() {
     e.preventDefault();
     if (!amountUSD || !costBRL) return;
 
+    const wallet = editingTx?.person || selectedWallet || 'Daniel';
     setShowAddModal(false);
     setIsLoading(true);
 
     const payload: Transaction = {
       id: editingTx ? editingTx.id : crypto.randomUUID(),
-      date: editingTx ? editingTx.date : new Date().toISOString(),
+      date: editingTx
+        ? (wallet === 'BofA' ? dateInputToIso(transactionDate) : editingTx.date)
+        : (wallet === 'BofA' ? dateInputToIso(transactionDate) : new Date().toISOString()),
       type: 'Deposit',
-      person: editingTx ? editingTx.person : (selectedWallet || 'Daniel'),
+      person: wallet,
       amountUSD: parseInputNumber(amountUSD),
       costBRL: parseInputNumber(costBRL),
       rowIndex: editingTx ? editingTx.rowIndex : undefined
@@ -260,6 +280,7 @@ export default function Home() {
 
     setAmountUSD('');
     setCostBRL('');
+    setTransactionDate(getTodayDateInput());
     setEditingTx(null);
 
     await fetch('/api/transactions', {
@@ -273,7 +294,10 @@ export default function Home() {
 
   const handleExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amountUSD || !description || !categoryName || !transactionDate) {
+    const wallet = editingTx?.person || selectedWallet || 'Daniel';
+    const dateIsOptional = wallet === 'BofA' || Boolean(editingTx && !editingTx.date);
+
+    if (!amountUSD || !description || !categoryName || (!dateIsOptional && !transactionDate)) {
         alert("Preencha todos os campos e selecione uma categoria!");
         return;
     }
@@ -285,7 +309,7 @@ export default function Home() {
       id: editingTx ? editingTx.id : crypto.randomUUID(),
       date: dateInputToIso(transactionDate),
       type: 'Expense',
-      person: editingTx ? editingTx.person : (selectedWallet || 'Daniel'),
+      person: wallet,
       amountUSD: parseInputNumber(amountUSD),
       description,
       category: categoryName,
@@ -312,7 +336,7 @@ export default function Home() {
     const sourceWallet = transferSourceWallet || selectedWallet;
 
     if (!sourceWallet || sourceWallet === 'BofA') return;
-    if (!transferSentUSD || !transferReceivedUSD || !transferFeeUSD || !transferDate) return;
+    if (!transferSentUSD || !transferReceivedUSD || !transferFeeUSD) return;
 
     const amountSent = parseSafeInputNumber(transferSentUSD);
     const amountReceived = parseSafeInputNumber(transferReceivedUSD);
@@ -386,6 +410,7 @@ export default function Home() {
     setAmountUSD(tx.amountUSD.toString());
     if (tx.type === 'Deposit') {
         setCostBRL(tx.costBRL?.toString() || '');
+        setTransactionDate(formatDateForInput(tx.date));
         setShowAddModal(true);
     } else {
         setDescription(tx.description || '');
@@ -399,6 +424,7 @@ export default function Home() {
     setEditingTx(null);
     setAmountUSD('');
     setCostBRL('');
+    setTransactionDate(selectedWallet === 'BofA' ? '' : getTodayDateInput());
     setShowAddModal(true);
   };
 
@@ -407,7 +433,7 @@ export default function Home() {
     setAmountUSD('');
     setDescription('');
     setCategoryName('');
-    setTransactionDate(getTodayDateInput());
+    setTransactionDate(selectedWallet === 'BofA' ? '' : getTodayDateInput());
     setShowExpenseModal(true);
   };
 
@@ -421,7 +447,7 @@ export default function Home() {
     setTransferFeeUSD('');
     setTransferCalcMode(null);
     setTransferSourceWallet(selectedWallet);
-    setTransferDate(getTodayDateInput());
+    setTransferDate('');
     setShowTransferModal(true);
   };
 
@@ -574,6 +600,7 @@ export default function Home() {
   };
   const selectedWalletBalance = selectedWallet ? walletBalances[selectedWallet] : 0;
   const depositModalWallet = editingTx?.person || selectedWallet;
+  const movementDateIsOptional = depositModalWallet === 'BofA' || Boolean(editingTx && !editingTx.date);
   const depositActionLabel = depositModalWallet === 'BofA' ? 'Enviar Dinheiro' : 'Comprar Dólar';
   const walletSummaries = WALLETS.map(wallet => ({ wallet, balance: walletBalances[wallet] }));
 
@@ -596,8 +623,8 @@ export default function Home() {
   const filterByHistoryPeriod = (tx: Transaction) => {
     if (historyPeriod === 'All') return true;
 
-    const time = new Date(tx.date).getTime();
-    if (Number.isNaN(time)) return false;
+    const time = getTransactionTimestamp(tx.date);
+    if (time === null) return false;
 
     if (historyPeriod === 'Today') return time >= startOfDay && time < endOfDay;
     if (historyPeriod === 'Week') return time >= startOfWeek && time < endOfDay;
@@ -638,6 +665,15 @@ export default function Home() {
       inTx,
       referenceTx: outTx || inTx || tx,
     }];
+  }).sort((first, second) => {
+    const firstDate = first.kind === 'transaction' ? first.tx.date : first.date;
+    const secondDate = second.kind === 'transaction' ? second.tx.date : second.date;
+    const dateComparison = compareOptionalDatesNewestFirst(firstDate, secondDate);
+    if (dateComparison !== 0) return dateComparison;
+
+    const firstReference = first.kind === 'transaction' ? first.tx : first.referenceTx;
+    const secondReference = second.kind === 'transaction' ? second.tx : second.referenceTx;
+    return compareTransactionsNewestFirst(firstReference, secondReference);
   });
 
   // --- Analytics Calculations ---
@@ -646,8 +682,8 @@ export default function Home() {
 
   const txYears = Array.from(new Set(transactions
     .map(t => {
-      const date = new Date(t.date);
-      return Number.isNaN(date.getTime()) ? null : date.getFullYear();
+      const timestamp = getTransactionTimestamp(t.date);
+      return timestamp === null ? null : new Date(timestamp).getFullYear();
     })
     .filter((year): year is number => year !== null)));
   const availableYears = txYears.length > 0 ? txYears : [new Date().getFullYear()];
@@ -660,8 +696,8 @@ export default function Home() {
   let spendSelectedMonth = 0;
 
   expenses.forEach(t => {
-    const time = new Date(t.date).getTime();
-    if (Number.isNaN(time)) return;
+    const time = getTransactionTimestamp(t.date);
+    if (time === null) return;
 
     if (time >= startOfDay && time < endOfDay) spendToday += t.amountUSD;
     if (time >= startOfWeek && time < endOfDay) spendThisWeek += t.amountUSD;
@@ -670,8 +706,8 @@ export default function Home() {
 
   // Category Breakdown logic for the selected month
   const expensesSelectedMonth = expenses.filter(t => {
-     const time = new Date(t.date).getTime();
-     return !Number.isNaN(time) && time >= startOfSelectedMonth && time < endOfSelectedMonth;
+     const time = getTransactionTimestamp(t.date);
+     return time !== null && time >= startOfSelectedMonth && time < endOfSelectedMonth;
   });
   
   const categoryTotals: Record<string, number> = {};
@@ -691,8 +727,8 @@ export default function Home() {
   const endOfAvg = endOfAvgDate.getTime();
   
   const expensesInAvgRange = expenses.filter(t => {
-     const time = new Date(t.date).getTime();
-     return !Number.isNaN(time) && time >= startOfAvg && time < endOfAvg;
+     const time = getTransactionTimestamp(t.date);
+     return time !== null && time >= startOfAvg && time < endOfAvg;
   });
   const totalAvgExpenses = expensesInAvgRange.reduce((acc, t) => acc + t.amountUSD, 0);
 
@@ -910,7 +946,7 @@ export default function Home() {
                             </p>
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-                                {new Date(item.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                                {formatDisplayDate(item.date)}
                               </span>
                               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${walletBadgeClass[item.sourceWallet]}`}>
                                 {item.sourceWallet}
@@ -973,7 +1009,7 @@ export default function Home() {
                           )}
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-                              {new Date(tx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                              {formatDisplayDate(tx.date)}
                             </span>
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${walletBadgeClass[tx.person]}`}>
                               {tx.person}
@@ -1071,6 +1107,19 @@ export default function Home() {
                       />
                     </div>
                   </div>
+                  {depositModalWallet === 'BofA' && (
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                        <Calendar className="w-4 h-4 text-emerald-500" /> Data da movimentação (opcional)
+                      </label>
+                      <input
+                        type="date"
+                        value={transactionDate}
+                        onChange={e => setTransactionDate(e.target.value)}
+                        className="w-full h-14 appearance-none bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold leading-none focus:border-emerald-500 focus:bg-white outline-none transition-all"
+                      />
+                    </div>
+                  )}
                 </>
               )}
 
@@ -1104,11 +1153,11 @@ export default function Home() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                      <Calendar className="w-4 h-4 text-rose-500" /> Data da compra
+                      <Calendar className="w-4 h-4 text-rose-500" /> Data da compra{movementDateIsOptional ? ' (opcional)' : ''}
                     </label>
                     <input
                       type="date"
-                      required
+                      required={!movementDateIsOptional}
                       value={transactionDate}
                       onChange={e => setTransactionDate(e.target.value)}
                       className="w-full h-14 appearance-none bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold leading-none focus:border-rose-500 focus:bg-white outline-none transition-all"
@@ -1223,11 +1272,10 @@ export default function Home() {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                  <Calendar className="w-4 h-4 text-blue-500" /> Data da transferência
+                  <Calendar className="w-4 h-4 text-blue-500" /> Data da transferência (opcional)
                 </label>
                 <input
                   type="date"
-                  required
                   value={transferDate}
                   onChange={e => setTransferDate(e.target.value)}
                   className="w-full h-14 appearance-none bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold leading-none focus:border-blue-500 focus:bg-white outline-none transition-all"
@@ -1360,7 +1408,9 @@ export default function Home() {
                   <div className="space-y-3">
                     {sortedCategories.map(([catName, amount]) => {
                       const isExpanded = expandedStatsCategory === catName;
-                      const catExpenses = expensesSelectedMonth.filter(t => (t.category || 'Outros') === catName).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                      const catExpenses = expensesSelectedMonth
+                        .filter(t => (t.category || 'Outros') === catName)
+                        .sort(compareTransactionsNewestFirst);
                       return (
                       <div key={catName} className="flex flex-col bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden mb-2 transition-all">
                         <button 
@@ -1381,7 +1431,9 @@ export default function Home() {
                               <div key={tx.id} className="flex justify-between items-center p-2 rounded-lg bg-white border border-gray-100 shadow-sm">
                                 <div className="truncate pr-2">
                                   <p className="font-semibold text-xs text-slate-700 truncate">{tx.description}</p>
-                                  <p className="text-[10px] font-bold text-gray-400 mt-0.5 whitespace-nowrap">{new Date(tx.date).toLocaleDateString('pt-BR')}</p>
+                                  <p className="text-[10px] font-bold text-gray-400 mt-0.5 whitespace-nowrap">
+                                    {formatDisplayDate(tx.date, { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                  </p>
                                 </div>
                                 <span className="font-bold text-xs text-slate-600 shrink-0">
                                   ${formatCurrency(tx.amountUSD)}

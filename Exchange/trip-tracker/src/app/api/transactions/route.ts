@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getGoogleSheets } from '@/lib/sheets';
 import type { sheets_v4 } from 'googleapis';
 import type { Transaction } from '@/types';
+import { compareTransactionsNewestFirst } from '@/lib/transactions';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,9 +35,10 @@ const parseNumber = (val: string | number | undefined | null) => {
 };
 
 const parseDate = (val: string | number | undefined | null) => {
-    if (!val) return new Date().toISOString();
+    if (val === undefined || val === null || val === '') return undefined;
     if (typeof val === 'number') {
-        return new Date(Math.round((val - 25569) * 86400 * 1000)).toISOString();
+        const date = new Date(Math.round((val - 25569) * 86400 * 1000));
+        return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
     }
     const str = val.toString();
     if (str.includes('T') || str.match(/^\d{4}-\d{2}-\d{2}/)) {
@@ -59,7 +61,7 @@ const parseDate = (val: string | number | undefined | null) => {
     }
     const fallback = new Date(str);
     if (!isNaN(fallback.getTime())) return fallback.toISOString();
-    return new Date().toISOString();
+    return undefined;
 };
 
 export async function GET() {
@@ -96,7 +98,7 @@ export async function GET() {
             rowIndex: index + 2,
         }));
 
-        return NextResponse.json({ transactions: transactions.reverse() });
+        return NextResponse.json({ transactions: transactions.sort(compareTransactionsNewestFirst) });
     } catch (error: unknown) {
         console.error('Error fetching transactions:', error);
         return NextResponse.json({ error: 'Failed to fetch transactions' }, { status: 500 });
@@ -124,7 +126,7 @@ export async function POST(request: Request) {
             requestBody: {
                 values: transactions.map(transaction => [
                     transaction.id,
-                    transaction.date,
+                    transaction.date || '',
                     transaction.type,
                     transaction.person,
                     transaction.amountUSD,
@@ -210,7 +212,7 @@ export async function PUT(request: Request) {
                 values: [
                     [
                         body.id,
-                        body.date,
+                        body.date || '',
                         body.type,
                         body.person,
                         body.amountUSD,

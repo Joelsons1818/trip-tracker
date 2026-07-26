@@ -3,7 +3,7 @@ export type TransactionType = 'Deposit' | 'Expense' | 'TransferOut' | 'TransferI
 
 export interface Transaction {
     id: string;
-    date: string;
+    date?: string;
     type: TransactionType;
     person: WalletId;
     amountUSD: number;
