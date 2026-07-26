@@ -96,7 +96,13 @@ export async function GET() {
             rowIndex: index + 2,
         }));
 
-        return NextResponse.json({ transactions: transactions.reverse() });
+        transactions.sort((a, b) => {
+            const dateDifference = new Date(b.date).getTime() - new Date(a.date).getTime();
+            if (dateDifference !== 0) return dateDifference;
+            return (b.rowIndex || 0) - (a.rowIndex || 0);
+        });
+
+        return NextResponse.json({ transactions });
     } catch (error: unknown) {
         console.error('Error fetching transactions:', error);
         return NextResponse.json({ error: 'Failed to fetch transactions' }, { status: 500 });
