@@ -243,14 +243,14 @@ export default function Home() {
 
   const handleDeposit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amountUSD || !costBRL || !transactionDate) return;
+    if (!amountUSD || !costBRL) return;
 
     setShowAddModal(false);
     setIsLoading(true);
 
     const payload: Transaction = {
       id: editingTx ? editingTx.id : crypto.randomUUID(),
-      date: dateInputToIso(transactionDate),
+      date: editingTx ? editingTx.date : new Date().toISOString(),
       type: 'Deposit',
       person: editingTx ? editingTx.person : (selectedWallet || 'Daniel'),
       amountUSD: parseInputNumber(amountUSD),
@@ -260,7 +260,6 @@ export default function Home() {
 
     setAmountUSD('');
     setCostBRL('');
-    setTransactionDate(getTodayDateInput());
     setEditingTx(null);
 
     await fetch('/api/transactions', {
@@ -387,7 +386,6 @@ export default function Home() {
     setAmountUSD(tx.amountUSD.toString());
     if (tx.type === 'Deposit') {
         setCostBRL(tx.costBRL?.toString() || '');
-        setTransactionDate(formatDateForInput(tx.date));
         setShowAddModal(true);
     } else {
         setDescription(tx.description || '');
@@ -401,7 +399,6 @@ export default function Home() {
     setEditingTx(null);
     setAmountUSD('');
     setCostBRL('');
-    setTransactionDate(getTodayDateInput());
     setShowAddModal(true);
   };
 
@@ -607,13 +604,7 @@ export default function Home() {
     return time >= startOfCurrentMonth && time < endOfCurrentMonth;
   };
 
-  const historyTransactions = [...walletFilteredTransactions]
-    .filter(filterByHistoryPeriod)
-    .sort((a, b) => {
-      const dateDifference = new Date(b.date).getTime() - new Date(a.date).getTime();
-      if (dateDifference !== 0) return dateDifference;
-      return (b.rowIndex || 0) - (a.rowIndex || 0);
-    });
+  const historyTransactions = walletFilteredTransactions.filter(filterByHistoryPeriod);
   const transferLookup = transactions.reduce<Record<string, Transaction[]>>((acc, tx) => {
     if (!isTransferTransaction(tx)) return acc;
     const groupId = getTransferGroupId(tx.id);
@@ -1079,19 +1070,6 @@ export default function Home() {
                         placeholder="0.00"
                       />
                     </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                      <Calendar className="w-4 h-4 text-emerald-500" />
-                      {depositModalWallet === 'BofA' ? 'Data do envio' : 'Data da compra'}
-                    </label>
-                    <input
-                      type="date"
-                      required
-                      value={transactionDate}
-                      onChange={e => setTransactionDate(e.target.value)}
-                      className="w-full h-14 appearance-none bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold leading-none focus:border-emerald-500 focus:bg-white outline-none transition-all"
-                    />
                   </div>
                 </>
               )}
