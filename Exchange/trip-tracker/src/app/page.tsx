@@ -295,9 +295,8 @@ export default function Home() {
   const handleExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     const wallet = editingTx?.person || selectedWallet || 'Daniel';
-    const dateIsOptional = wallet === 'BofA' || Boolean(editingTx && !editingTx.date);
 
-    if (!amountUSD || !description || !categoryName || (!dateIsOptional && !transactionDate)) {
+    if (!amountUSD || !description || !categoryName || !transactionDate) {
         alert("Preencha todos os campos e selecione uma categoria!");
         return;
     }
@@ -433,7 +432,7 @@ export default function Home() {
     setAmountUSD('');
     setDescription('');
     setCategoryName('');
-    setTransactionDate(selectedWallet === 'BofA' ? '' : getTodayDateInput());
+    setTransactionDate(getTodayDateInput());
     setShowExpenseModal(true);
   };
 
@@ -600,7 +599,6 @@ export default function Home() {
   };
   const selectedWalletBalance = selectedWallet ? walletBalances[selectedWallet] : 0;
   const depositModalWallet = editingTx?.person || selectedWallet;
-  const movementDateIsOptional = depositModalWallet === 'BofA' || Boolean(editingTx && !editingTx.date);
   const depositActionLabel = depositModalWallet === 'BofA' ? 'Enviar Dinheiro' : 'Comprar Dólar';
   const walletSummaries = WALLETS.map(wallet => ({ wallet, balance: walletBalances[wallet] }));
 
@@ -1153,11 +1151,11 @@ export default function Home() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                      <Calendar className="w-4 h-4 text-rose-500" /> Data da compra{movementDateIsOptional ? ' (opcional)' : ''}
+                      <Calendar className="w-4 h-4 text-rose-500" /> Data da compra
                     </label>
                     <input
                       type="date"
-                      required={!movementDateIsOptional}
+                      required
                       value={transactionDate}
                       onChange={e => setTransactionDate(e.target.value)}
                       className="w-full h-14 appearance-none bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold leading-none focus:border-rose-500 focus:bg-white outline-none transition-all"
