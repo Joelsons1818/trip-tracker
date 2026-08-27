@@ -270,7 +270,7 @@ export default function Home() {
       id: editingTx ? editingTx.id : crypto.randomUUID(),
       date: editingTx
         ? (wallet === 'BofA' ? dateInputToIso(transactionDate) : editingTx.date)
-        : (wallet === 'BofA' ? dateInputToIso(transactionDate) : new Date().toISOString()),
+        : (wallet === 'BofA' ? dateInputToIso(transactionDate || getTodayDateInput()) : new Date().toISOString()),
       type: 'Deposit',
       person: wallet,
       amountUSD: parseInputNumber(amountUSD),
@@ -423,7 +423,7 @@ export default function Home() {
     setEditingTx(null);
     setAmountUSD('');
     setCostBRL('');
-    setTransactionDate(selectedWallet === 'BofA' ? '' : getTodayDateInput());
+    setTransactionDate(getTodayDateInput());
     setShowAddModal(true);
   };
 
