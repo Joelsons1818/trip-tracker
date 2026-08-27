@@ -99,6 +99,7 @@ const MONTHS = [
 ];
 
 const WALLETS: WalletId[] = ['Daniel', 'Marília', 'BofA'];
+const DEFAULT_DEPOSIT_DESCRIPTION = 'Compra de Dólar';
 
 type HistoryPeriod = 'All' | 'Today' | 'Week' | 'Month';
 type TransferCalcMode = 'received' | 'fee' | null;
@@ -269,17 +270,21 @@ export default function Home() {
     const payload: Transaction = {
       id: editingTx ? editingTx.id : crypto.randomUUID(),
       date: editingTx
-        ? (wallet === 'BofA' ? dateInputToIso(transactionDate) : editingTx.date)
-        : (wallet === 'BofA' ? dateInputToIso(transactionDate || getTodayDateInput()) : new Date().toISOString()),
+        ? (dateInputToIso(transactionDate) || editingTx.date)
+        : dateInputToIso(transactionDate || getTodayDateInput()),
       type: 'Deposit',
       person: wallet,
       amountUSD: parseInputNumber(amountUSD),
       costBRL: parseInputNumber(costBRL),
+      description: wallet === 'BofA'
+        ? (description.trim() || DEFAULT_DEPOSIT_DESCRIPTION)
+        : editingTx?.description,
       rowIndex: editingTx ? editingTx.rowIndex : undefined
     };
 
     setAmountUSD('');
     setCostBRL('');
+    setDescription('');
     setTransactionDate(getTodayDateInput());
     setEditingTx(null);
 
@@ -356,7 +361,9 @@ export default function Home() {
     setIsLoading(true);
 
     const transferId = editingTransfer?.id || crypto.randomUUID();
-    const transferDateIso = dateInputToIso(transferDate);
+    const transferDateIso = editingTransfer
+      ? (dateInputToIso(transferDate) || editingTransfer.outTx.date || editingTransfer.inTx.date)
+      : dateInputToIso(transferDate || getTodayDateInput());
     const payload: Transaction[] = [
       {
         id: editingTransfer?.outTx.id || `${transferId}-out`,
@@ -409,6 +416,7 @@ export default function Home() {
     setAmountUSD(tx.amountUSD.toString());
     if (tx.type === 'Deposit') {
         setCostBRL(tx.costBRL?.toString() || '');
+        setDescription(tx.person === 'BofA' ? (tx.description?.trim() || DEFAULT_DEPOSIT_DESCRIPTION) : '');
         setTransactionDate(formatDateForInput(tx.date));
         setShowAddModal(true);
     } else {
@@ -423,6 +431,7 @@ export default function Home() {
     setEditingTx(null);
     setAmountUSD('');
     setCostBRL('');
+    setDescription(selectedWallet === 'BofA' ? DEFAULT_DEPOSIT_DESCRIPTION : '');
     setTransactionDate(getTodayDateInput());
     setShowAddModal(true);
   };
@@ -446,7 +455,7 @@ export default function Home() {
     setTransferFeeUSD('');
     setTransferCalcMode(null);
     setTransferSourceWallet(selectedWallet);
-    setTransferDate('');
+    setTransferDate(getTodayDateInput());
     setShowTransferModal(true);
   };
 
@@ -940,7 +949,7 @@ export default function Home() {
                           <p className="font-bold text-gray-800 truncate">Transferência para BofA</p>
                           <div className="flex flex-col items-start gap-1 mt-2">
                             <p className="font-black text-[17px] text-blue-700 leading-none">
-                              ${formatCurrency(item.sentAmount)} -&gt; ${formatCurrency(item.receivedAmount)}
+                              $ {formatCurrency(item.sentAmount)} -&gt; $ {formatCurrency(item.receivedAmount)}
                             </p>
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
@@ -954,7 +963,7 @@ export default function Home() {
                               </span>
                             </div>
                             <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">
-                              Fee ${formatCurrency(item.fee)}
+                              Fee $ {formatCurrency(item.fee)}
                             </span>
                           </div>
                         </div>
@@ -988,7 +997,7 @@ export default function Home() {
                 const isExpense = tx.type === 'Expense';
                 const isIncoming = isIncomingTransaction(tx);
                 const isItemDeleting = isDeleting === tx.id;
-                const transactionTitle = isDeposit ? 'Compra de Dólar' : tx.description;
+                const transactionTitle = isDeposit ? (tx.description?.trim() || DEFAULT_DEPOSIT_DESCRIPTION) : tx.description;
                 const canEdit = isDeposit || isExpense;
 
                 return (
@@ -1075,6 +1084,17 @@ export default function Home() {
 
               {showAddModal && (
                 <>
+                  {depositModalWallet === 'BofA' && (
+                    <input
+                      type="text"
+                      required
+                      aria-label="Nome da movimentação"
+                      value={description}
+                      onChange={e => setDescription(e.target.value)}
+                      className="w-full h-14 bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold focus:border-emerald-500 focus:bg-white outline-none transition-all"
+                      placeholder={DEFAULT_DEPOSIT_DESCRIPTION}
+                    />
+                  )}
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Valor (USD)</label>
                     <div className="relative">
@@ -1105,19 +1125,17 @@ export default function Home() {
                       />
                     </div>
                   </div>
-                  {depositModalWallet === 'BofA' && (
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                        <Calendar className="w-4 h-4 text-emerald-500" /> Data da movimentação (opcional)
-                      </label>
-                      <input
-                        type="date"
-                        value={transactionDate}
-                        onChange={e => setTransactionDate(e.target.value)}
-                        className="w-full h-14 appearance-none bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold leading-none focus:border-emerald-500 focus:bg-white outline-none transition-all"
-                      />
-                    </div>
-                  )}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                      <Calendar className="w-4 h-4 text-emerald-500" /> {depositModalWallet === 'BofA' ? 'Data da movimentação' : 'Data da compra'}
+                    </label>
+                    <input
+                      type="date"
+                      value={transactionDate}
+                      onChange={e => setTransactionDate(e.target.value)}
+                      className="w-full h-14 appearance-none bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold leading-none focus:border-emerald-500 focus:bg-white outline-none transition-all"
+                    />
+                  </div>
                 </>
               )}
 
@@ -1270,7 +1288,7 @@ export default function Home() {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                  <Calendar className="w-4 h-4 text-blue-500" /> Data da transferência (opcional)
+                  <Calendar className="w-4 h-4 text-blue-500" /> Data da transferência
                 </label>
                 <input
                   type="date"
