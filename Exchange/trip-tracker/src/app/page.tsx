@@ -1,6 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { calculateAverages, cents, getSpendingTransactions, partitionAnalysisExpenses, sumAmounts } from '@/lib/analysis';
+import { formatUSDate, usDateToIso } from '@/lib/dates';
 import type { Transaction, Category, WalletId } from '@/types';
 import {
   compareOptionalDatesNewestFirst,
@@ -45,57 +47,28 @@ const formatCurrency = (val: number) => {
   return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
-const formatDateForInput = (dateValue?: string) => {
-  if (!dateValue) return '';
+const formatDateForInput = formatUSDate;
+const getTodayDateInput = () => formatUSDate(new Date().toISOString());
 
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return '';
-
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
-};
-
-const dateInputToIso = (dateValue: string) => dateValue ? `${dateValue}T12:00:00.000Z` : undefined;
-
-const getTodayDateInput = () => formatDateForInput(new Date().toISOString());
-
-const formatDisplayDate = (
-  dateValue?: string,
-  options: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short' },
-) => {
-  const timestamp = getTransactionTimestamp(dateValue);
-  if (timestamp === null) return 'Sem data';
-
-  return new Date(timestamp).toLocaleDateString('pt-BR', options);
-};
-
-const DAY_IN_MS = 24 * 60 * 60 * 1000;
-
-const getLocalDateOnlyKey = (date: Date) => Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
-
-const getDaysBetweenLocalDates = (startDate: Date, endDate: Date) => {
-  const startKey = getLocalDateOnlyKey(startDate);
-  const endKey = getLocalDateOnlyKey(endDate);
-
-  return Math.max(1, (endKey - startKey) / DAY_IN_MS);
+const focusFirstInput = (form: HTMLFormElement | null) => {
+  const input = form?.querySelector('input');
+  input?.focus();
+  input?.select();
 };
 
 const MONTHS = [
   { value: 0, label: 'Jan' },
-  { value: 1, label: 'Fev' },
+  { value: 1, label: 'Feb' },
   { value: 2, label: 'Mar' },
-  { value: 3, label: 'Abr' },
-  { value: 4, label: 'Mai' },
+  { value: 3, label: 'Apr' },
+  { value: 4, label: 'May' },
   { value: 5, label: 'Jun' },
   { value: 6, label: 'Jul' },
-  { value: 7, label: 'Ago' },
-  { value: 8, label: 'Set' },
-  { value: 9, label: 'Out' },
+  { value: 7, label: 'Aug' },
+  { value: 8, label: 'Sep' },
+  { value: 9, label: 'Oct' },
   { value: 10, label: 'Nov' },
-  { value: 11, label: 'Dez' },
+  { value: 11, label: 'Dec' },
 ];
 
 const WALLETS: WalletId[] = ['Daniel', 'Marília', 'BofA'];
@@ -205,6 +178,12 @@ export default function Home() {
   const [newCatCodebook, setNewCatCodebook] = useState('');
 
   // Analytics State
+  const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
+  const [preferencesReady, setPreferencesReady] = useState(false);
+  const [preferencesError, setPreferencesError] = useState('');
+  const [savingPreference, setSavingPreference] = useState<string | null>(null);
+  const [preferenceMessage, setPreferenceMessage] = useState('');
+  const [showExcluded, setShowExcluded] = useState(false);
   const [expandedStatsCategory, setExpandedStatsCategory] = useState<string | null>(null);
   
   const [selMonth, setSelMonth] = useState(new Date().getMonth());
@@ -215,7 +194,48 @@ export default function Home() {
   const [avgEndMonth, setAvgEndMonth] = useState(new Date().getMonth());
   const [avgEndYear, setAvgEndYear] = useState(new Date().getFullYear());
 
-  const fetchTransactions = async () => {
+  const fetchAnalysisPreferences = useCallback(async () => {
+    setPreferencesReady(false);
+    setPreferencesError('');
+    try {
+      const response = await fetch('/api/analysis-preferences', { cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok || !Array.isArray(data.excludedIds) || !data.excludedIds.every((id: unknown) => typeof id === 'string')) {
+        throw new Error('Não foi possível carregar as exclusões.');
+      }
+      setExcludedIds(new Set(data.excludedIds));
+      setPreferencesReady(true);
+    } catch {
+      setPreferencesError('Não foi possível carregar as exclusões. Atualize para consultar a análise.');
+    }
+  }, []);
+
+  const toggleAnalysisExclusion = async (tx: Transaction) => {
+    if (!preferencesReady || savingPreference || !tx.id) return;
+    const excluded = !excludedIds.has(tx.id);
+    setSavingPreference(tx.id);
+    setPreferenceMessage('');
+    try {
+      const response = await fetch('/api/analysis-preferences', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactionId: tx.id, excluded }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Não foi possível salvar a preferência.');
+      setExcludedIds(previous => {
+        const next = new Set(previous);
+        if (excluded) next.add(tx.id); else next.delete(tx.id);
+        return next;
+      });
+      setPreferenceMessage(excluded ? 'Gasto excluído de todas as análises. O saldo não mudou.' : 'Gasto incluído novamente em todas as análises.');
+    } catch (error) {
+      setPreferenceMessage(error instanceof Error ? error.message : 'Falha ao salvar. Tente novamente.');
+    } finally {
+      setSavingPreference(null);
+    }
+  };
+
+  const fetchTransactions = useCallback(async () => {
     setIsLoading(true);
     try {
       const res = await fetch('/api/transactions');
@@ -226,8 +246,9 @@ export default function Home() {
     } catch (err) {
       console.error(err);
     }
+    await fetchAnalysisPreferences();
     setIsLoading(false);
-  };
+  }, [fetchAnalysisPreferences]);
 
   const fetchCategories = async () => {
     try {
@@ -242,7 +263,7 @@ export default function Home() {
   useEffect(() => {
     fetchTransactions();
     fetchCategories();
-  }, []);
+  }, [fetchTransactions]);
 
   const resetTransferForm = () => {
     setTransferSentUSD('');
@@ -264,14 +285,15 @@ export default function Home() {
     if (!amountUSD || !costBRL) return;
 
     const wallet = editingTx?.person || selectedWallet || 'Daniel';
+    if (transactionDate && !usDateToIso(transactionDate)) { alert('Informe uma data válida no formato MM/DD/AAAA.'); return; }
     setShowAddModal(false);
     setIsLoading(true);
 
     const payload: Transaction = {
       id: editingTx ? editingTx.id : crypto.randomUUID(),
       date: editingTx
-        ? (dateInputToIso(transactionDate) || editingTx.date)
-        : dateInputToIso(transactionDate || getTodayDateInput()),
+        ? (usDateToIso(transactionDate) || editingTx.date)
+        : usDateToIso(transactionDate || getTodayDateInput()) || undefined,
       type: 'Deposit',
       person: wallet,
       amountUSD: parseInputNumber(amountUSD),
@@ -306,12 +328,15 @@ export default function Home() {
         return;
     }
 
+    const date = usDateToIso(transactionDate);
+    if (!date) { alert('Informe uma data válida no formato MM/DD/AAAA.'); return; }
+
     setShowExpenseModal(false);
     setIsLoading(true);
 
     const payload: Transaction = {
       id: editingTx ? editingTx.id : crypto.randomUUID(),
-      date: dateInputToIso(transactionDate),
+      date,
       type: 'Expense',
       person: wallet,
       amountUSD: parseInputNumber(amountUSD),
@@ -342,10 +367,14 @@ export default function Home() {
     if (!sourceWallet || sourceWallet === 'BofA') return;
     if (!transferSentUSD || !transferReceivedUSD || !transferFeeUSD) return;
 
+    const transferDateIso = transferDate ? usDateToIso(transferDate)
+      : editingTransfer ? (editingTransfer.outTx.date || editingTransfer.inTx.date) : usDateToIso(getTodayDateInput());
+    if (transferDate && !transferDateIso) { alert('Informe uma data válida no formato MM/DD/AAAA.'); return; }
+
     const amountSent = parseSafeInputNumber(transferSentUSD);
     const amountReceived = parseSafeInputNumber(transferReceivedUSD);
     const amountFee = parseSafeInputNumber(transferFeeUSD);
-    const amountsAreSynced = Math.abs(amountSent - amountReceived - amountFee) <= 0.01;
+    const amountsAreSynced = cents(amountSent) === cents(amountReceived) + cents(amountFee);
 
     if (amountSent <= 0 || amountReceived <= 0 || amountFee < 0 || amountReceived > amountSent || amountFee > amountSent || !amountsAreSynced) {
       alert('Confira os valores da transferência. O valor enviado precisa ser igual ao valor que chega mais a fee.');
@@ -361,13 +390,10 @@ export default function Home() {
     setIsLoading(true);
 
     const transferId = editingTransfer?.id || crypto.randomUUID();
-    const transferDateIso = editingTransfer
-      ? (dateInputToIso(transferDate) || editingTransfer.outTx.date || editingTransfer.inTx.date)
-      : dateInputToIso(transferDate || getTodayDateInput());
     const payload: Transaction[] = [
       {
         id: editingTransfer?.outTx.id || `${transferId}-out`,
-        date: transferDateIso,
+        date: transferDateIso || undefined,
         type: 'TransferOut',
         person: sourceWallet,
         amountUSD: amountSent,
@@ -377,7 +403,7 @@ export default function Home() {
       },
       {
         id: editingTransfer?.inTx.id || `${transferId}-in`,
-        date: transferDateIso,
+        date: transferDateIso || undefined,
         type: 'TransferIn',
         person: 'BofA',
         amountUSD: amountReceived,
@@ -569,9 +595,11 @@ export default function Home() {
     }
   };
 
-  const totalDeposits = transactions.filter(isIncomingTransaction).reduce((acc, t) => acc + t.amountUSD, 0);
-  const totalExpenses = transactions.filter(isOutgoingTransaction).reduce((acc, t) => acc + t.amountUSD, 0);
-  const balance = totalDeposits - totalExpenses;
+  const spending = getSpendingTransactions(transactions);
+  const totalDeposits = sumAmounts(transactions.filter(t => t.type === 'Deposit'));
+  const totalExpenses = sumAmounts(spending.expenses);
+  const balance = (cents(sumAmounts(transactions.filter(isIncomingTransaction)))
+    - cents(sumAmounts(transactions.filter(isOutgoingTransaction)))) / 100;
 
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -597,9 +625,9 @@ export default function Home() {
   };
 
   const getWalletBalance = (wallet: WalletId) => {
-    const deps = transactions.filter(t => isIncomingTransaction(t) && t.person === wallet).reduce((acc, t) => acc + t.amountUSD, 0);
-    const exps = transactions.filter(t => isOutgoingTransaction(t) && t.person === wallet).reduce((acc, t) => acc + t.amountUSD, 0);
-    return deps - exps;
+    const deps = sumAmounts(transactions.filter(t => isIncomingTransaction(t) && t.person === wallet));
+    const exps = sumAmounts(transactions.filter(t => isOutgoingTransaction(t) && t.person === wallet));
+    return (cents(deps) - cents(exps)) / 100;
   };
   const walletBalances: Record<WalletId, number> = {
     Daniel: getWalletBalance('Daniel'),
@@ -614,7 +642,7 @@ export default function Home() {
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
-  const startOfWeek = startOfDay - 6 * DAY_IN_MS;
+  const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6).getTime();
   const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
   const endOfCurrentMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
   const startOfSelectedMonth = new Date(selYear, selMonth, 1).getTime();
@@ -667,7 +695,7 @@ export default function Home() {
       sourceWallet,
       sentAmount,
       receivedAmount,
-      fee: Math.max(0, sentAmount - receivedAmount),
+      fee: Math.max(0, cents(sentAmount) - cents(receivedAmount)) / 100,
       outTx,
       inTx,
       referenceTx: outTx || inTx || tx,
@@ -685,7 +713,14 @@ export default function Home() {
 
   // --- Analytics Calculations ---
   // Analytics apply only to the filtered view
-  const expenses = walletFilteredTransactions.filter(t => t.type === 'Expense');
+  const walletExpenses = historyFilter === 'Total'
+    ? spending.expenses
+    : spending.expenses.filter(t => t.person === historyFilter);
+  const { included: expenses, excluded: excludedExpenses } = partitionAnalysisExpenses(walletExpenses, excludedIds);
+  const excludedSelectedMonth = excludedExpenses.filter(tx => {
+    const time = getTransactionTimestamp(tx.date);
+    return time !== null && time >= startOfSelectedMonth && time < endOfSelectedMonth;
+  });
 
   const txYears = Array.from(new Set(transactions
     .map(t => {
@@ -698,18 +733,13 @@ export default function Home() {
   if (!availableYears.includes(new Date().getFullYear() + 1)) availableYears.push(new Date().getFullYear() + 1);
   availableYears.sort((a, b) => a - b);
 
-  let spendToday = 0;
-  let spendThisWeek = 0;
-  let spendSelectedMonth = 0;
-
-  expenses.forEach(t => {
+  const sumInPeriod = (start: number, end: number) => sumAmounts(expenses.filter(t => {
     const time = getTransactionTimestamp(t.date);
-    if (time === null) return;
-
-    if (time >= startOfDay && time < endOfDay) spendToday += t.amountUSD;
-    if (time >= startOfWeek && time < endOfDay) spendThisWeek += t.amountUSD;
-    if (time >= startOfSelectedMonth && time < endOfSelectedMonth) spendSelectedMonth += t.amountUSD;
-  });
+    return time !== null && time >= start && time < end;
+  }));
+  const spendToday = sumInPeriod(startOfDay, endOfDay);
+  const spendThisWeek = sumInPeriod(startOfWeek, endOfDay);
+  const spendSelectedMonth = sumInPeriod(startOfSelectedMonth, endOfSelectedMonth);
 
   // Category Breakdown logic for the selected month
   const expensesSelectedMonth = expenses.filter(t => {
@@ -720,31 +750,13 @@ export default function Home() {
   const categoryTotals: Record<string, number> = {};
   expensesSelectedMonth.forEach(t => {
       const cat = t.category || 'Outros';
-      categoryTotals[cat] = (categoryTotals[cat] || 0) + t.amountUSD;
+      categoryTotals[cat] = (cents(categoryTotals[cat] || 0) + cents(t.amountUSD)) / 100;
   });
   const sortedCategories = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]);
 
-  // Custom Average Logic
-  const startOfAvgDate = new Date(avgStartYear, avgStartMonth, 1);
-  const selectedEndOfAvgDate = new Date(avgEndYear, avgEndMonth + 1, 1);
-  const endOfAvgDate = selectedEndOfAvgDate.getTime() > startOfAvgDate.getTime()
-    ? selectedEndOfAvgDate
-    : new Date(avgStartYear, avgStartMonth + 1, 1);
-  const startOfAvg = startOfAvgDate.getTime();
-  const endOfAvg = endOfAvgDate.getTime();
-  
-  const expensesInAvgRange = expenses.filter(t => {
-     const time = getTransactionTimestamp(t.date);
-     return time !== null && time >= startOfAvg && time < endOfAvg;
-  });
-  const totalAvgExpenses = expensesInAvgRange.reduce((acc, t) => acc + t.amountUSD, 0);
-
-  let monthsInAvg = (avgEndYear - avgStartYear) * 12 + (avgEndMonth - avgStartMonth) + 1;
-  if (monthsInAvg <= 0) monthsInAvg = 1;
-  const daysInAvg = getDaysBetweenLocalDates(startOfAvgDate, endOfAvgDate);
-
-  const dailyAverage = totalAvgExpenses / daysInAvg;
-  const monthlyAverage = totalAvgExpenses / monthsInAvg;
+  const averages = calculateAverages(expenses, avgStartYear, avgStartMonth, avgEndYear, avgEndMonth, now);
+  const dailyAverage = averages.daily;
+  const monthlyAverage = averages.monthly;
   const selectedMonthLabel = isSelectedCurrentMonth ? 'Este Mês' : 'Mês Selecionado';
   const selectedCategoriesLabel = isSelectedCurrentMonth ? 'Categorias Neste Mês' : 'Categorias no Mês';
 
@@ -762,7 +774,7 @@ export default function Home() {
               <button onClick={() => setShowCategorySettings(true)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-full transition-colors" title="Gerenciar Categorias">
                 <Settings className="w-5 h-5 text-purple-300" />
               </button>
-              <button onClick={() => setShowStatsModal(true)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-full transition-colors" title="Visão de Gastos">
+              <button onClick={() => { setShowExcluded(false); setShowStatsModal(true); }} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-full transition-colors" title="Visão de Gastos">
                 <BarChart2 className="w-5 h-5 text-cyan-300" />
               </button>
               <button onClick={fetchTransactions} className="p-2 hover:bg-slate-800 rounded-full transition-colors">
@@ -774,6 +786,7 @@ export default function Home() {
           <div className="bg-white/10 backdrop-blur-md rounded-2xl p-5 border border-white/20 shadow-lg relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-cyan-400"></div>
             <p className="text-gray-300 text-sm font-medium mb-1">Saldo Disponível (USD)</p>
+            {spending.invalidTransfers > 0 && <p role="alert" className="text-xs text-amber-200 mb-2">Há {spending.invalidTransfers} transferência(s) incompleta(s) ou inconsistente(s). As tarifas desses registros não puderam ser calculadas.</p>}
             <p className="text-4xl font-extrabold tracking-tight">${formatCurrency(balance)}</p>
 
             <div className="flex gap-4 mt-5 pt-4 border-t border-white/10">
@@ -783,7 +796,7 @@ export default function Home() {
               </div>
               <div className="w-px bg-white/10"></div>
               <div className="flex-1">
-                <p className="text-xs text-rose-300 font-medium flex items-center gap-1 mb-1"><ArrowUpRight className="w-3 h-3" /> Saídas</p>
+                <p className="text-xs text-rose-300 font-medium flex items-center gap-1 mb-1"><ArrowUpRight className="w-3 h-3" /> Saídas reais</p>
                 <p className="font-semibold">${formatCurrency(totalExpenses)}</p>
               </div>
             </div>
@@ -907,7 +920,7 @@ export default function Home() {
                 {[
                   { value: 'All', label: 'Tudo' },
                   { value: 'Today', label: 'Hoje' },
-                  { value: 'Week', label: 'Semana' },
+                  { value: 'Week', label: '7 dias' },
                   { value: 'Month', label: 'Mês' },
                 ].map(period => (
                   <button
@@ -922,6 +935,8 @@ export default function Home() {
             </div>
           </div>
 
+          {preferencesError && <p role="alert" className="text-sm text-amber-800 mb-3">{preferencesError} <button onClick={fetchAnalysisPreferences} className="underline">Tentar novamente</button></p>}
+          {preferenceMessage && <p role="status" className="text-sm text-slate-600 mb-3">{preferenceMessage}</p>}
           {isLoading && historyItems.length === 0 ? (
             <div className="space-y-3">
               {[1, 2, 3].map(i => (
@@ -953,7 +968,7 @@ export default function Home() {
                             </p>
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-                                {formatDisplayDate(item.date)}
+                                {formatUSDate(item.date) || 'Sem data'}
                               </span>
                               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${walletBadgeClass[item.sourceWallet]}`}>
                                 {item.sourceWallet}
@@ -999,15 +1014,22 @@ export default function Home() {
                 const isItemDeleting = isDeleting === tx.id;
                 const transactionTitle = isDeposit ? (tx.description?.trim() || DEFAULT_DEPOSIT_DESCRIPTION) : tx.description;
                 const canEdit = isDeposit || isExpense;
+                const excludedFromAnalysis = isExpense && excludedIds.has(tx.id);
 
                 return (
-                  <div key={tx.id} className={`bg-white p-4 rounded-2xl shadow-sm border border-gray-200 flex items-center justify-between gap-3 transition-all ${isItemDeleting ? 'opacity-50 scale-95' : 'hover:border-gray-300'}`}>
+                  <div key={tx.id} className={`bg-white p-4 rounded-2xl shadow-sm border border-gray-200 flex items-center justify-between gap-3 transition-all ${excludedFromAnalysis ? 'border-dashed opacity-75' : ''} ${isItemDeleting ? 'opacity-50 scale-95' : 'hover:border-gray-300'}`}>
                     <div className="flex items-start gap-4 min-w-0">
                       <div className={`shrink-0 w-12 h-12 rounded-full flex items-center justify-center ${isIncoming ? 'bg-emerald-100' : 'bg-red-50'}`}>
                         {isIncoming ? <ArrowDownRight className="w-6 h-6 text-emerald-600" /> : <ArrowUpRight className="w-6 h-6 text-rose-500" />}
                       </div>
                       <div className="min-w-0 pr-2">
                         <p className="font-bold text-gray-800 truncate">{transactionTitle}</p>
+                        {excludedFromAnalysis && <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-1 rounded">Excluído da análise</span>}
+                        {isExpense && <button type="button" onClick={() => toggleAnalysisExclusion(tx)}
+                          disabled={!preferencesReady || !!savingPreference || isLoading || isItemDeleting || !tx.id}
+                          className="block text-xs text-slate-500 underline mt-2 disabled:opacity-40">
+                          {savingPreference === tx.id ? 'Salvando…' : excludedFromAnalysis ? 'Incluir novamente' : 'Excluir da análise'}
+                        </button>}
                         <div className="flex flex-col items-start gap-1 mt-2">
                           {!isDeposit && (
                             <p className={`font-black text-[17px] leading-none ${isIncoming ? 'text-emerald-500' : 'text-rose-600'}`}>
@@ -1016,7 +1038,7 @@ export default function Home() {
                           )}
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-                              {formatDisplayDate(tx.date)}
+                              {formatUSDate(tx.date) || 'Sem data'}
                             </span>
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${walletBadgeClass[tx.person]}`}>
                               {tx.person}
@@ -1078,7 +1100,7 @@ export default function Home() {
               {showAddModal ? <><PlusCircle className="text-emerald-500" /> {editingTx ? 'Editar Dólar' : depositActionLabel}</> : <><MinusCircle className="text-rose-500" /> {editingTx ? 'Editar Gasto' : 'Registrar Gasto'}</>}
             </h3>
 
-            <form onSubmit={showAddModal ? handleDeposit : handleExpense} className="space-y-4">
+            <form ref={focusFirstInput} onSubmit={showAddModal ? handleDeposit : handleExpense} className="space-y-4">
 
               {/* A pessoa/conta é associada automaticamente com a carteira selecionada */}
 
@@ -1130,7 +1152,11 @@ export default function Home() {
                       <Calendar className="w-4 h-4 text-emerald-500" /> {depositModalWallet === 'BofA' ? 'Data da movimentação' : 'Data da compra'}
                     </label>
                     <input
-                      type="date"
+                      type="text"
+                      placeholder="MM/DD/YYYY"
+                      aria-label="Data (MM/DD/YYYY)"
+                      pattern="[0-9]{2}/[0-9]{2}/[0-9]{4}"
+                      maxLength={10}
                       value={transactionDate}
                       onChange={e => setTransactionDate(e.target.value)}
                       className="w-full h-14 appearance-none bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold leading-none focus:border-emerald-500 focus:bg-white outline-none transition-all"
@@ -1169,10 +1195,14 @@ export default function Home() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                      <Calendar className="w-4 h-4 text-rose-500" /> Data da compra
+                      <Calendar className="w-4 h-4 text-rose-500" /> Data da compra (MM/DD/AAAA)
                     </label>
                     <input
-                      type="date"
+                      type="text"
+                      placeholder="MM/DD/YYYY"
+                      aria-label="Data (MM/DD/YYYY)"
+                      pattern="[0-9]{2}/[0-9]{2}/[0-9]{4}"
+                      maxLength={10}
                       required
                       value={transactionDate}
                       onChange={e => setTransactionDate(e.target.value)}
@@ -1231,7 +1261,7 @@ export default function Home() {
               <Send className="text-blue-500" /> {editingTransfer ? 'Editar transferência' : 'Transferir para BofA'}
             </h3>
 
-            <form onSubmit={handleTransferToBofA} className="space-y-4">
+            <form ref={focusFirstInput} onSubmit={handleTransferToBofA} className="space-y-4">
               <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
                 <p className="text-xs text-blue-500 font-bold uppercase tracking-wide mb-1">Origem</p>
                 <p className="font-black text-blue-900">Wise {transferSourceWallet}</p>
@@ -1288,10 +1318,14 @@ export default function Home() {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                  <Calendar className="w-4 h-4 text-blue-500" /> Data da transferência
+                  <Calendar className="w-4 h-4 text-blue-500" /> Data da transferência (MM/DD/AAAA)
                 </label>
                 <input
-                  type="date"
+                  type="text"
+                      placeholder="MM/DD/YYYY"
+                      aria-label="Data (MM/DD/YYYY)"
+                      pattern="[0-9]{2}/[0-9]{2}/[0-9]{4}"
+                      maxLength={10}
                   value={transferDate}
                   onChange={e => setTransferDate(e.target.value)}
                   className="w-full h-14 appearance-none bg-gray-50 border-2 border-gray-200 rounded-2xl px-4 py-3 text-base font-semibold leading-none focus:border-blue-500 focus:bg-white outline-none transition-all"
@@ -1333,14 +1367,20 @@ export default function Home() {
               <BarChart2 className="text-cyan-500" /> Visão de Gastos
             </h3>
 
-            <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1 pb-4">
+            <p className="text-xs text-slate-500 mb-3">{historyFilter === 'Total' ? 'Todas as carteiras' : historyFilter} · Inclui tarifas na carteira de origem.</p>
+            {!preferencesReady ? <p role="status" className="text-sm text-amber-800">
+              {preferencesError || 'Carregando preferências da análise…'}
+              {preferencesError && <button onClick={fetchAnalysisPreferences} className="underline ml-2">Tentar novamente</button>}
+            </p> : <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1 pb-4">
+              <p className="text-xs text-slate-500">Gastos excluídos não entram nos totais, categorias nem médias. O saldo e as saídas reais continuam considerando todos os gastos.</p>
+              {preferenceMessage && <p role="status" className="text-xs text-slate-600">{preferenceMessage}</p>}
               <div className="grid grid-cols-2 gap-3 pb-4 border-b border-gray-100">
                 <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
                   <p className="text-xs text-slate-500 font-bold mb-1 uppercase tracking-wide">Hoje</p>
                   <p className="text-2xl font-black text-slate-800">${formatCurrency(spendToday)}</p>
                 </div>
                 <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                  <p className="text-xs text-slate-500 font-bold mb-1 uppercase tracking-wide">Esta Semana</p>
+                  <p className="text-xs text-slate-500 font-bold mb-1 uppercase tracking-wide">Últimos 7 dias</p>
                   <p className="text-2xl font-black text-slate-800">${formatCurrency(spendThisWeek)}</p>
                 </div>
               </div>
@@ -1365,6 +1405,37 @@ export default function Home() {
                 </div>
 
                 <p className="text-4xl font-black text-cyan-900 relative z-0 break-words">${formatCurrency(spendSelectedMonth)}</p>
+              </div>
+
+              <div className="overflow-hidden rounded-xl border border-slate-100 bg-white">
+                <button type="button" onClick={() => setShowExcluded(!showExcluded)}
+                  aria-expanded={showExcluded} aria-controls="excluded-expenses"
+                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-semibold text-slate-500 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-cyan-500">
+                  <span>Excluídos</span>
+                  <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] tabular-nums text-slate-500">{excludedExpenses.length}</span>
+                  <ChevronDown aria-hidden="true" className={`ml-auto h-3.5 w-3.5 text-slate-400 transition-transform ${showExcluded ? 'rotate-180' : ''}`} />
+                </button>
+                {showExcluded && <div id="excluded-expenses" className="border-t border-slate-100 px-3 pb-3">
+                  <div className="flex items-center justify-between gap-2 py-3 text-[11px] text-slate-400">
+                    <span>No mês selecionado · {excludedSelectedMonth.length}</span>
+                    <span className="font-semibold tabular-nums text-slate-600">${formatCurrency(sumAmounts(excludedSelectedMonth))}</span>
+                  </div>
+                  <div className="max-h-56 overflow-y-auto divide-y divide-slate-100">
+                    {excludedExpenses.length === 0 && <p className="py-2 text-xs text-slate-400">Nenhum gasto excluído nesta carteira.</p>}
+                    {excludedExpenses.length > 0 && <p className="pb-2 text-[10px] text-slate-400">Todos os meses</p>}
+                    {[...excludedExpenses].sort(compareTransactionsNewestFirst).map(tx => <div key={tx.id} className="py-3 text-xs">
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="min-w-0 font-medium text-slate-700">{tx.description}</p>
+                        <span className="shrink-0 font-semibold tabular-nums text-slate-600">${formatCurrency(tx.amountUSD)}</span>
+                      </div>
+                      <p className="mt-1 text-[10px] text-slate-400">{formatUSDate(tx.date) || 'Sem data'} · {tx.person}</p>
+                      <button onClick={() => toggleAnalysisExclusion(tx)} disabled={!!savingPreference}
+                        className="mt-2 rounded-md bg-slate-50 px-2 py-1.5 text-[11px] font-medium text-slate-600 transition-colors hover:bg-cyan-50 hover:text-cyan-700 disabled:opacity-40">
+                        {savingPreference === tx.id ? 'Salvando…' : 'Incluir novamente'}
+                      </button>
+                    </div>)}
+                  </div>
+                </div>}
               </div>
 
               <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 mb-4 mt-1">
@@ -1404,14 +1475,18 @@ export default function Home() {
                   </div>
                 </div>
 
+                <p className="text-xs text-gray-500 mb-3" role="status">
+                  {!averages.valid ? 'Selecione um período válido que comece até o mês atual.'
+                    : `Total de $${formatCurrency(averages.total)} em ${averages.days} dias. Média mensal: total ÷ ${averages.months} mês(es) selecionado(s).${averages.partial ? ' Período parcial: gastos e dias considerados somente até hoje.' : ''}`}
+                </p>
                 <div className="grid grid-cols-2 gap-3 pt-3 border-t border-gray-200">
                   <div>
                     <p className="text-[10px] text-gray-500 font-bold mb-0.5 uppercase tracking-wide">Média Diária</p>
-                    <p className="text-lg font-black text-gray-800">${formatCurrency(dailyAverage)}</p>
+                    <p className="text-lg font-black text-gray-800">${averages.valid ? formatCurrency(dailyAverage) : '—'}</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-gray-500 font-bold mb-0.5 uppercase tracking-wide">Média Mensal</p>
-                    <p className="text-lg font-black text-gray-800">${formatCurrency(monthlyAverage)}</p>
+                    <p className="text-lg font-black text-gray-800">${averages.valid ? formatCurrency(monthlyAverage) : '—'}</p>
                   </div>
                 </div>
               </div>
@@ -1447,9 +1522,12 @@ export default function Home() {
                               <div key={tx.id} className="flex justify-between items-center p-2 rounded-lg bg-white border border-gray-100 shadow-sm">
                                 <div className="truncate pr-2">
                                   <p className="font-semibold text-xs text-slate-700 truncate">{tx.description}</p>
-                                  <p className="text-[10px] font-bold text-gray-400 mt-0.5 whitespace-nowrap">
-                                    {formatDisplayDate(tx.date, { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                                  </p>
+                                  {transactions.some(item => item.id === tx.id && item.type === 'Expense') && <button
+                                    onClick={() => toggleAnalysisExclusion(tx)} disabled={!!savingPreference}
+                                    className="text-[11px] text-slate-500 underline mt-1 disabled:opacity-40">
+                                    {savingPreference === tx.id ? 'Salvando…' : 'Excluir da análise'}
+                                  </button>}
+                                  <p className="text-[10px] font-bold text-gray-400 mt-0.5 whitespace-nowrap">{formatUSDate(tx.date) || 'Sem data'}</p>
                                 </div>
                                 <span className="font-bold text-xs text-slate-600 shrink-0">
                                   ${formatCurrency(tx.amountUSD)}
@@ -1464,7 +1542,7 @@ export default function Home() {
                 )}
               </div>
 
-            </div>
+            </div>}
           </div>
         </div>
       )}
@@ -1498,7 +1576,7 @@ export default function Home() {
               ))}
             </div>
 
-            <form onSubmit={handleCreateCategory} className="pt-4 border-t border-gray-100 mt-auto">
+            <form ref={focusFirstInput} onSubmit={handleCreateCategory} className="pt-4 border-t border-gray-100 mt-auto">
               <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Nova Categoria</p>
               <div className="space-y-3">
                 <input

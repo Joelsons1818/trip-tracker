@@ -17,6 +17,5 @@ export async function getGoogleSheets() {
     scopes: SCOPES,
   });
 
-  const client = await auth.getClient();
-  return google.sheets({ version: 'v4', auth: client as any });
+  return google.sheets({ version: 'v4', auth });
 }

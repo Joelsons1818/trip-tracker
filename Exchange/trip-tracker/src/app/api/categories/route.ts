@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getGoogleSheets } from '@/lib/sheets';
-import { Category } from '@/types';
+import type { sheets_v4 } from 'googleapis';
+import type { Category } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,9 +18,9 @@ const DEFAULT_CATEGORIES = [
     { name: 'Farmácia', codebook: 'Medicamentos e produtos de saúde' },
 ];
 
-async function ensureCategoriasSheet(sheets: any, sheetId: string) {
+async function ensureCategoriasSheet(sheets: sheets_v4.Sheets, sheetId: string) {
     const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
-    const exists = spreadsheet.data.sheets?.some((s: any) => s.properties.title === 'Categorias');
+    const exists = spreadsheet.data.sheets?.some((s) => s.properties?.title === 'Categorias');
     
     if (!exists) {
         // Create the sheet
@@ -64,14 +65,14 @@ export async function GET() {
         const rows = response.data.values;
         if (!rows || rows.length === 0) return NextResponse.json({ categories: [] });
         
-        const categories: Category[] = rows.map((row: any[], index: number) => ({
-            id: row[0] || index.toString(),
-            name: row[0] || '',
-            codebook: row[1] || ''
+        const categories: Category[] = rows.map((row: unknown[], index: number) => ({
+            id: String(row[0] || index),
+            name: String(row[0] || ''),
+            codebook: String(row[1] || '')
         })).filter(c => c.name);
         
         return NextResponse.json({ categories });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Error fetching categories:', error);
         return NextResponse.json({ error: 'Failed to fetch categories' }, { status: 500 });
     }
@@ -94,7 +95,7 @@ export async function POST(request: Request) {
         });
         
         return NextResponse.json({ success: true, category: body });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Error creating category:', error);
         return NextResponse.json({ error: 'Failed to create category' }, { status: 500 });
     }
@@ -116,15 +117,15 @@ export async function DELETE(request: Request) {
         });
         
         const rows = response.data.values;
-        const rowIndex = rows?.findIndex((row: any[]) => row[0] === nameId);
+        const rowIndex = rows?.findIndex((row: unknown[]) => row[0] === nameId);
         if (rowIndex === undefined || rowIndex === -1) {
             return NextResponse.json({ error: 'Category not found' }, { status: 404 });
         }
         
         const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
-        const categoriesSheetId = spreadsheet.data.sheets?.find((s: any) => s.properties.title === 'Categorias')?.properties?.sheetId;
+        const categoriesSheetId = spreadsheet.data.sheets?.find((s) => s.properties?.title === 'Categorias')?.properties?.sheetId;
         
-        if (categoriesSheetId === undefined) {
+        if (categoriesSheetId == null) {
             return NextResponse.json({ error: 'Categorias sheet not found' }, { status: 404 });
         }
 

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "TZ=America/Los_Angeles node --experimental-strip-types --test tests/*.test.mjs"
   },
   "dependencies": {
     "googleapis": "^171.4.0",
