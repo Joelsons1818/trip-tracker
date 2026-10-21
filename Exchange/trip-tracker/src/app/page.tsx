@@ -951,7 +951,6 @@ export default function Home() {
                   </p>
                 </div>
               </div>
-              {selectedWallet === 'Cartão' && <p className="mb-4 text-xs text-slate-500">Compras entram nas categorias na data da compra. Pagamentos saem do BofA e ficam nos dois históricos, sem duplicar despesas. Ajustes em compras já pagas podem gerar crédito.</p>}
               <div className="grid grid-cols-2 gap-3">
                 {selectedWallet === 'Cartão' ? <button onClick={() => openPayment()} disabled={cardBalance <= 0 || !cardRevision || cardSaving || isLoading}
                   className="rounded-xl bg-violet-100 p-3 font-bold text-violet-800 disabled:opacity-40">Pagar cartão</button> : <button
