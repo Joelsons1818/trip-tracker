@@ -1,3 +1,5 @@
+import { readCardLedger } from '@/lib/card-store';
+import { readCardEvents, materializeCard } from '@/lib/card';
 import { NextResponse } from 'next/server';
 import { getGoogleSheets } from '@/lib/sheets';
 import { readAnalysisPreferences, saveAnalysisPreference } from '@/lib/analysis-preferences';
@@ -37,6 +39,11 @@ export async function PUT(request: Request) {
       range: `'${title.replace(/'/g, "''")}'!A2:D` });
     const rows: unknown[][] = response.data.values || [];
     const matches = rows.filter(row => row[0] === transactionId && row[2] === 'Expense');
+    if (transactionId.startsWith('card-')) {
+      const ledger = await readCardLedger(sheets, spreadsheetId);
+      const cardExpenses = materializeCard(readCardEvents(ledger.rows)).filter(tx => tx.id === transactionId && tx.type === 'Expense');
+      matches.push(...cardExpenses.map(tx => [tx.id]));
+    }
     if (matches.length !== 1) {
       return NextResponse.json({ error: 'Gasto não encontrado ou identificador duplicado. Atualize o histórico.' }, { status: 409 });
     }

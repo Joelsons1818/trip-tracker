@@ -1,5 +1,5 @@
-export type WalletId = 'Daniel' | 'Marília' | 'BofA';
-export type TransactionType = 'Deposit' | 'Expense' | 'TransferOut' | 'TransferIn';
+export type WalletId = 'Daniel' | 'Marília' | 'BofA' | 'Cartão';
+export type TransactionType = 'Deposit' | 'Expense' | 'TransferOut' | 'TransferIn' | 'CardPayment';
 
 export interface Transaction {
     id: string;

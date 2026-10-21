@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, type InputHTMLAttributes } from 'react';
 import { calculateAverages, cents, getSpendingTransactions, partitionAnalysisExpenses, sumAmounts } from '@/lib/analysis';
+import { belongsToWallet, getCardBalance, getCashBalance, isCardTransaction, type CardCommand } from '@/lib/card';
 import { formatUSDate, usDateToIso } from '@/lib/dates';
 import type { Transaction, Category, WalletId } from '@/types';
 import {
@@ -9,7 +10,7 @@ import {
   compareTransactionsNewestFirst,
   getTransactionTimestamp,
 } from '@/lib/transactions';
-import { PlusCircle, MinusCircle, Wallet, ArrowUpRight, ArrowDownRight, RefreshCw, HandCoins, Trash2, BarChart2, X, Calendar, ChevronDown, Settings, Edit3, Tag, Send } from 'lucide-react';
+import { PlusCircle, MinusCircle, Wallet, ArrowUpRight, ArrowDownRight, RefreshCw, HandCoins, Trash2, BarChart2, X, Calendar, ChevronDown, Settings, Edit3, Tag, Send, CreditCard } from 'lucide-react';
 
 const parseInputNumber = (val: string) => {
     if (!val) return 0;
@@ -55,6 +56,28 @@ const focusFirstInput = (form: HTMLFormElement | null) => {
   input?.focus();
   input?.select();
 };
+
+function DateField(props: InputHTMLAttributes<HTMLInputElement>) {
+  const picker = useRef<HTMLInputElement>(null);
+  const [fallback, setFallback] = useState(false);
+  const iso = usDateToIso(String(props.value || ''))?.slice(0, 10) || '';
+  return <div className="relative">
+    <input {...props} className={`${props.className || ''} pr-12`} />
+    <button type="button" aria-label="Abrir calendário" className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-500" onClick={() => {
+      try {
+        if (picker.current?.showPicker) picker.current.showPicker();
+        else setFallback(true);
+      } catch { setFallback(true); }
+    }}><Calendar className="h-5 w-5" /></button>
+    <input ref={picker} type="date" aria-label="Selecionar data no calendário" tabIndex={fallback ? 0 : -1}
+      className={fallback ? 'mt-2 w-full rounded-xl border p-3' : 'absolute bottom-0 left-0 h-px w-px opacity-0 pointer-events-none'}
+      value={iso} onChange={event => {
+        const value = event.target.value ? formatUSDate(`${event.target.value}T12:00:00.000Z`) : '';
+        props.onChange?.({ target: { value } } as React.ChangeEvent<HTMLInputElement>);
+        setFallback(false);
+      }} />
+  </div>;
+}
 
 const MONTHS = [
   { value: 0, label: 'Jan' },
@@ -103,16 +126,17 @@ const walletTextClass: Record<WalletId, string> = {
   Daniel: 'text-indigo-900',
   Marília: 'text-rose-800',
   BofA: 'text-blue-900',
+  Cartão: 'text-violet-900',
 };
 
 const walletBadgeClass: Record<WalletId, string> = {
   Daniel: 'bg-blue-50 border border-blue-200 text-blue-700 shadow-sm',
   Marília: 'bg-yellow-50 border border-yellow-200 text-yellow-700 shadow-sm',
   BofA: 'bg-white border border-blue-300 text-blue-800 shadow-sm',
+  Cartão: 'bg-violet-50 border border-violet-200 text-violet-700',
 };
 
 const isIncomingTransaction = (tx: Transaction) => tx.type === 'Deposit' || tx.type === 'TransferIn';
-const isOutgoingTransaction = (tx: Transaction) => tx.type === 'Expense' || tx.type === 'TransferOut';
 const isTransferTransaction = (tx: Transaction) => tx.type === 'TransferIn' || tx.type === 'TransferOut';
 const getTransferGroupId = (id: string) => id.replace(/-(in|out)$/, '');
 const isWalletId = (value: string | undefined): value is WalletId => value === 'Daniel' || value === 'Marília' || value === 'BofA';
@@ -149,6 +173,12 @@ export default function Home() {
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
 
   // Modals state
+  const [showCardPayment, setShowCardPayment] = useState(false);
+  const [cardRevision, setCardRevision] = useState('');
+  const [cardError, setCardError] = useState('');
+  const [cardSaving, setCardSaving] = useState(false);
+  const cardSaveLock = useRef(false);
+  const cardRequestId = useRef('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -238,13 +268,17 @@ export default function Home() {
   const fetchTransactions = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/transactions');
-      const data = await res.json();
-      if (data.transactions) {
-        setTransactions(data.transactions);
+      const [res, cardRes] = await Promise.all([fetch('/api/transactions'), fetch('/api/card', { cache: 'no-store' })]);
+      const [data, cardData] = await Promise.all([res.json(), cardRes.json()]);
+      if (!res.ok || !cardRes.ok || !Array.isArray(data.transactions) || !Array.isArray(cardData.transactions)) {
+        throw new Error('Não foi possível atualizar os saldos completos. Tente novamente.');
       }
+      setTransactions([...data.transactions, ...cardData.transactions]);
+      setCardRevision(cardData.revision);
+      setCardError('');
     } catch (err) {
-      console.error(err);
+      setCardError(err instanceof Error ? err.message : 'Falha ao carregar o cartão.');
+      setCardRevision('');
     }
     await fetchAnalysisPreferences();
     setIsLoading(false);
@@ -264,6 +298,42 @@ export default function Home() {
     fetchTransactions();
     fetchCategories();
   }, [fetchTransactions]);
+
+  const saveCard = async (command: Omit<CardCommand, 'revision' | 'requestId'>) => {
+    if (cardSaveLock.current || !cardRevision) return false;
+    cardSaveLock.current = true;
+    setCardSaving(true);
+    try {
+      const response = await fetch('/api/card', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...command, revision: cardRevision, requestId: cardRequestId.current || crypto.randomUUID() }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Falha ao salvar o cartão.');
+      await fetchTransactions();
+      return true;
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Falha ao salvar. Atualize e confira o histórico.');
+      await fetchTransactions();
+      return false;
+    } finally { cardSaveLock.current = false; setCardSaving(false); }
+  };
+
+  const openPayment = (tx?: Transaction) => {
+    setEditingTx(tx || null);
+    setAmountUSD((tx?.amountUSD ?? Math.max(0, getCardBalance(transactions))).toFixed(2));
+    setTransactionDate(tx ? formatUSDate(tx.date) : getTodayDateInput());
+    cardRequestId.current = crypto.randomUUID();
+    setShowCardPayment(true);
+  };
+
+  const handleCardPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const date = usDateToIso(transactionDate);
+    const amount = editingTx ? parseInputNumber(amountUSD) : getCardBalance(transactions);
+    if (!date || !Number.isFinite(amount) || amount <= 0) { alert('Confira a data e o valor do pagamento.'); return; }
+    const success = await saveCard(editingTx ? { action: 'edit', transaction: { ...editingTx, amountUSD: amount, date } }
+      : { action: 'pay', date });
+    if (success) { setShowCardPayment(false); setEditingTx(null); }
+  };
 
   const resetTransferForm = () => {
     setTransferSentUSD('');
@@ -330,6 +400,18 @@ export default function Home() {
 
     const date = usDateToIso(transactionDate);
     if (!date) { alert('Informe uma data válida no formato MM/DD/AAAA.'); return; }
+
+    if (wallet === 'Cartão') {
+      const amount = parseInputNumber(amountUSD);
+      if (!Number.isFinite(amount) || amount <= 0) { alert('Informe um valor positivo.'); return; }
+      if (editingTx && !confirm('Deseja confirmar?')) return;
+      const success = await saveCard({ action: editingTx ? 'edit' : 'purchase', transaction: {
+        id: editingTx?.id || `card-purchase-${cardRequestId.current}`, person: 'Cartão', type: 'Expense',
+        amountUSD: amount, description, category: categoryName, date,
+      } });
+      if (success) { setShowExpenseModal(false); setEditingTx(null); setAmountUSD(''); setDescription(''); setCategoryName(''); }
+      return;
+    }
 
     setShowExpenseModal(false);
     setIsLoading(true);
@@ -433,6 +515,8 @@ export default function Home() {
   };
 
   const openEditModal = (tx: Transaction) => {
+    if (tx.type === 'CardPayment') { openPayment(tx); return; }
+    cardRequestId.current = crypto.randomUUID();
     if (isTransferTransaction(tx)) {
       alert('Para corrigir uma transferência, apague a transferência e registre novamente.');
       return;
@@ -463,6 +547,7 @@ export default function Home() {
   };
 
   const openNewExpenseModal = () => {
+    cardRequestId.current = crypto.randomUUID();
     setEditingTx(null);
     setAmountUSD('');
     setDescription('');
@@ -566,6 +651,12 @@ export default function Home() {
   };
 
   const handleDelete = async (tx: Transaction) => {
+    if (isCardTransaction(tx)) {
+      if (!confirm('Deseja confirmar?')) return;
+      cardRequestId.current = crypto.randomUUID();
+      await saveCard({ action: 'delete', id: tx.id });
+      return;
+    }
     if (!tx.rowIndex) return;
 
     const transferGroupId = isTransferTransaction(tx) ? getTransferGroupId(tx.id) : null;
@@ -575,7 +666,7 @@ export default function Home() {
           .sort((a, b) => (b.rowIndex || 0) - (a.rowIndex || 0))
       : [tx];
 
-    if (!confirm(transferGroupId ? 'Apagar esta transferência da planilha?' : 'Tem certeza que deseja apagar esta transação da planilha?')) {
+    if (!confirm('Deseja confirmar?')) {
       return;
     }
 
@@ -597,9 +688,9 @@ export default function Home() {
 
   const spending = getSpendingTransactions(transactions);
   const totalDeposits = sumAmounts(transactions.filter(t => t.type === 'Deposit'));
-  const totalExpenses = sumAmounts(spending.expenses);
-  const balance = (cents(sumAmounts(transactions.filter(isIncomingTransaction)))
-    - cents(sumAmounts(transactions.filter(isOutgoingTransaction)))) / 100;
+  const totalExpenses = sumAmounts(spending.expenses.filter(tx => tx.person !== 'Cartão')) + sumAmounts(transactions.filter(tx => tx.type === 'CardPayment'));
+  const cardBalance = getCardBalance(transactions);
+  const balance = getCashBalance(transactions);
 
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -617,22 +708,19 @@ export default function Home() {
   };
 
   const handleDeleteCategory = async (nameC: string) => {
-    if (!confirm('Deletar essa categoria? Ela desaparecerá da lista, mas não apagará o histórico passado.')) return;
+    if (!confirm('Deseja confirmar?')) return;
     setIsLoading(true);
     await fetch(`/api/categories?id=${encodeURIComponent(nameC)}`, { method: 'DELETE' });
     fetchCategories();
     setIsLoading(false);
   };
 
-  const getWalletBalance = (wallet: WalletId) => {
-    const deps = sumAmounts(transactions.filter(t => isIncomingTransaction(t) && t.person === wallet));
-    const exps = sumAmounts(transactions.filter(t => isOutgoingTransaction(t) && t.person === wallet));
-    return (cents(deps) - cents(exps)) / 100;
-  };
+  const getWalletBalance = (wallet: WalletId) => getCashBalance(transactions, wallet);
   const walletBalances: Record<WalletId, number> = {
     Daniel: getWalletBalance('Daniel'),
     Marília: getWalletBalance('Marília'),
     BofA: getWalletBalance('BofA'),
+    Cartão: cardBalance,
   };
   const selectedWalletBalance = selectedWallet ? walletBalances[selectedWallet] : 0;
   const depositModalWallet = editingTx?.person || selectedWallet;
@@ -653,7 +741,7 @@ export default function Home() {
 
   const walletFilteredTransactions = historyFilter === 'Total' 
     ? transactions 
-    : transactions.filter(t => t.person === historyFilter);
+    : transactions.filter(t => belongsToWallet(t, historyFilter));
 
   const filterByHistoryPeriod = (tx: Transaction) => {
     if (historyPeriod === 'All') return true;
@@ -787,7 +875,7 @@ export default function Home() {
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-cyan-400"></div>
             <p className="text-gray-300 text-sm font-medium mb-1">Saldo Disponível (USD)</p>
             {spending.invalidTransfers > 0 && <p role="alert" className="text-xs text-amber-200 mb-2">Há {spending.invalidTransfers} transferência(s) incompleta(s) ou inconsistente(s). As tarifas desses registros não puderam ser calculadas.</p>}
-            <p className="text-4xl font-extrabold tracking-tight">${formatCurrency(balance)}</p>
+            <p className="text-4xl font-extrabold tracking-tight">{cardError ? 'Indisponível' : `$${formatCurrency(balance)}`}</p>
 
             <div className="flex gap-4 mt-5 pt-4 border-t border-white/10">
               <div className="flex-1">
@@ -805,6 +893,7 @@ export default function Home() {
       </header>
 
       <main className="max-w-md mx-auto px-4">
+        {cardError && <p role="alert" className="mb-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{cardError} <button className="underline" onClick={fetchTransactions}>Atualizar</button></p>}
         {/* NEW WALLETS SECTION */}
         <div className="mb-8">
           <h2 className="text-lg font-bold text-gray-800 mb-4 px-1">Carteiras</h2>
@@ -825,11 +914,17 @@ export default function Home() {
             </button>
             <button
               onClick={() => setSelectedWallet(selectedWallet === 'BofA' ? null : 'BofA')}
-              className={`col-span-2 p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 overflow-hidden relative ${selectedWallet === 'BofA' ? 'bg-blue-900 border-red-500 text-white shadow-md scale-100' : 'bg-white border-blue-200 text-blue-800 hover:border-red-300 hover:bg-blue-50/50'}`}
+              className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 overflow-hidden relative ${selectedWallet === 'BofA' ? 'bg-blue-900 border-red-500 text-white shadow-md scale-100' : 'bg-white border-blue-200 text-blue-800 hover:border-red-300 hover:bg-blue-50/50'}`}
             >
               <span className="absolute top-0 left-0 h-1.5 w-full bg-gradient-to-r from-red-500 via-white to-blue-600"></span>
               <Wallet className="w-6 h-6" />
               <span className="font-bold">BofA</span>
+            </button>
+            <button onClick={() => { setSelectedWallet(selectedWallet === 'Cartão' ? null : 'Cartão'); setHistoryFilter('Cartão'); }}
+              className={`p-4 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 transition-colors ${selectedWallet === 'Cartão' ? 'bg-violet-900 border-violet-700 text-white' : 'bg-white border-violet-200 text-violet-800 hover:bg-violet-50'}`}>
+              <CreditCard className="w-6 h-6" />
+              <span className="font-bold">Cartão</span>
+              <span className="text-xs">{cardError ? 'Indisponível' : `${cardBalance < 0 ? 'Crédito' : 'Em aberto'}: $${formatCurrency(Math.abs(cardBalance))}`}</span>
             </button>
           </div>
 
@@ -850,28 +945,31 @@ export default function Home() {
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 animate-in fade-in slide-in-from-top-2">
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <p className="text-sm text-gray-500 font-bold uppercase tracking-wide">Saldo Disponível</p>
+                  <p className="text-sm text-gray-500 font-bold uppercase tracking-wide">{selectedWallet === 'Cartão' ? cardBalance < 0 ? 'Crédito no cartão' : 'Valor em aberto' : 'Saldo Disponível'}</p>
                   <p className={`text-3xl font-black ${walletTextClass[selectedWallet]}`}>
-                    ${formatCurrency(selectedWalletBalance)}
+                    {cardError ? 'Indisponível' : `$${formatCurrency(selectedWallet === 'Cartão' ? Math.abs(selectedWalletBalance) : selectedWalletBalance)}`}
                   </p>
                 </div>
               </div>
+              {selectedWallet === 'Cartão' && <p className="mb-4 text-xs text-slate-500">Compras entram nas categorias na data da compra. Pagamentos saem do BofA e ficam nos dois históricos, sem duplicar despesas. Ajustes em compras já pagas podem gerar crédito.</p>}
               <div className="grid grid-cols-2 gap-3">
-                <button
+                {selectedWallet === 'Cartão' ? <button onClick={() => openPayment()} disabled={cardBalance <= 0 || !cardRevision || cardSaving || isLoading}
+                  className="rounded-xl bg-violet-100 p-3 font-bold text-violet-800 disabled:opacity-40">Pagar cartão</button> : <button
                   onClick={openNewDepositModal}
                   className="bg-emerald-50 text-emerald-600 font-bold p-3 rounded-xl border border-emerald-100 hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2"
                 >
                   <PlusCircle className="w-5 h-5" />
                   {selectedWallet === 'BofA' ? 'Enviar Dinheiro' : 'Comprar Dólar'}
-                </button>
+                </button>}
                 <button
                   onClick={openNewExpenseModal}
+                  disabled={selectedWallet === 'Cartão' && (!cardRevision || cardSaving || isLoading)}
                   className="bg-rose-50 text-rose-600 font-bold p-3 rounded-xl border border-rose-100 hover:bg-rose-100 transition-colors flex items-center justify-center gap-2"
                 >
                   <MinusCircle className="w-5 h-5" />
                   Registrar Gasto
                 </button>
-                {selectedWallet !== 'BofA' && (
+                {selectedWallet !== 'BofA' && selectedWallet !== 'Cartão' && (
                   <button
                     onClick={openTransferModal}
                     className="col-span-2 bg-blue-50 text-blue-700 font-bold p-3 rounded-xl border border-blue-100 hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"
@@ -915,6 +1013,7 @@ export default function Home() {
                 >
                   BofA
                 </button>
+                <button onClick={() => setHistoryFilter('Cartão')} className={`px-2.5 py-1 text-xs font-bold rounded-md ${historyFilter === 'Cartão' ? 'bg-violet-900 text-white' : 'text-gray-500'}`}>Cartão</button>
               </div>
               <div className="flex flex-wrap justify-end bg-gray-200/50 p-1 rounded-lg">
                 {[
@@ -1010,10 +1109,10 @@ export default function Home() {
                 const tx = item.tx;
                 const isDeposit = tx.type === 'Deposit';
                 const isExpense = tx.type === 'Expense';
-                const isIncoming = isIncomingTransaction(tx);
+                const isIncoming = tx.type === 'CardPayment' ? historyFilter === 'Cartão' : isIncomingTransaction(tx);
                 const isItemDeleting = isDeleting === tx.id;
-                const transactionTitle = isDeposit ? (tx.description?.trim() || DEFAULT_DEPOSIT_DESCRIPTION) : tx.description;
-                const canEdit = isDeposit || isExpense;
+                const transactionTitle = tx.type === 'CardPayment' ? (historyFilter === 'Cartão' ? 'Pagamento recebido do BofA' : 'Pagamento do cartão') : isDeposit ? (tx.description?.trim() || DEFAULT_DEPOSIT_DESCRIPTION) : tx.description;
+                const canEdit = isDeposit || isExpense || tx.type === 'CardPayment';
                 const excludedFromAnalysis = isExpense && excludedIds.has(tx.id);
 
                 return (
@@ -1041,7 +1140,7 @@ export default function Home() {
                               {formatUSDate(tx.date) || 'Sem data'}
                             </span>
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${walletBadgeClass[tx.person]}`}>
-                              {tx.person}
+                              {tx.type === 'CardPayment' ? 'BofA → Cartão' : tx.person}
                             </span>
                           </div>
                           {isExpense && tx.category && (
@@ -1067,7 +1166,7 @@ export default function Home() {
                         {canEdit && (
                           <button
                             onClick={() => openEditModal(tx)}
-                            disabled={isItemDeleting || isLoading}
+                            disabled={isItemDeleting || isLoading || cardSaving || (isCardTransaction(tx) && !cardRevision)}
                             className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors disabled:opacity-50"
                             title="Editar transação"
                           >
@@ -1076,7 +1175,7 @@ export default function Home() {
                         )}
                         <button
                           onClick={() => handleDelete(tx)}
-                          disabled={isItemDeleting || isLoading}
+                          disabled={isItemDeleting || isLoading || cardSaving || (isCardTransaction(tx) && !cardRevision)}
                           className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors disabled:opacity-50"
                           title="Apagar transação"
                         >
@@ -1092,6 +1191,18 @@ export default function Home() {
         </div>
       </main>
 
+      {showCardPayment && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+        <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-xl">
+          <h3 className="text-xl font-bold mb-4">{editingTx ? 'Editar pagamento' : 'Pagar cartão'}</h3>
+          <form ref={focusFirstInput} onSubmit={handleCardPayment} className="space-y-4">
+            {editingTx ? <label className="block text-sm font-semibold">Valor (USD)<input aria-label="Valor do pagamento" value={amountUSD} onChange={e => setAmountUSD(e.target.value)} required inputMode="decimal" className="mt-1 w-full rounded-xl border p-3" /></label>
+              : <p className="text-3xl font-black text-violet-900">${formatCurrency(Math.max(0, cardBalance))}</p>}
+            <label className="block text-sm font-semibold">Data (MM/DD/AAAA)<DateField aria-label="Data do pagamento" value={transactionDate} onChange={e => setTransactionDate(e.target.value)} required placeholder="MM/DD/YYYY" pattern="[0-9]{2}/[0-9]{2}/[0-9]{4}" maxLength={10} className="mt-1 w-full rounded-xl border p-3" /></label>
+            <div className="flex gap-2"><button type="button" disabled={cardSaving} onClick={() => { setShowCardPayment(false); setEditingTx(null); }} className="flex-1 rounded-xl p-3 text-slate-500">Cancelar</button>
+              <button type="submit" disabled={cardSaving || !cardRevision} className="flex-1 rounded-xl bg-violet-700 p-3 text-white font-bold disabled:opacity-40">{cardSaving ? 'Salvando…' : 'Confirmar'}</button></div>
+          </form>
+        </div>
+      </div>}
       {/* MODALS */}
       {(showAddModal || showExpenseModal) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm transition-opacity">
@@ -1151,7 +1262,7 @@ export default function Home() {
                     <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
                       <Calendar className="w-4 h-4 text-emerald-500" /> {depositModalWallet === 'BofA' ? 'Data da movimentação' : 'Data da compra'}
                     </label>
-                    <input
+                    <DateField
                       type="text"
                       placeholder="MM/DD/YYYY"
                       aria-label="Data (MM/DD/YYYY)"
@@ -1197,7 +1308,7 @@ export default function Home() {
                     <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
                       <Calendar className="w-4 h-4 text-rose-500" /> Data da compra (MM/DD/AAAA)
                     </label>
-                    <input
+                    <DateField
                       type="text"
                       placeholder="MM/DD/YYYY"
                       aria-label="Data (MM/DD/YYYY)"
@@ -1243,6 +1354,7 @@ export default function Home() {
                 </button>
                 <button
                   type="submit"
+                  disabled={cardSaving || ((editingTx?.person || selectedWallet) === 'Cartão' && !cardRevision)}
                   className={`flex-1 py-3.5 text-white font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 ${showAddModal ? 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-200' : 'bg-rose-500 hover:bg-rose-600 shadow-rose-200'}`}
                 >
                   Salvar
@@ -1320,7 +1432,7 @@ export default function Home() {
                 <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
                   <Calendar className="w-4 h-4 text-blue-500" /> Data da transferência (MM/DD/AAAA)
                 </label>
-                <input
+                <DateField
                   type="text"
                       placeholder="MM/DD/YYYY"
                       aria-label="Data (MM/DD/YYYY)"
@@ -1368,8 +1480,8 @@ export default function Home() {
             </h3>
 
             <p className="text-xs text-slate-500 mb-3">{historyFilter === 'Total' ? 'Todas as carteiras' : historyFilter} · Inclui tarifas na carteira de origem.</p>
-            {!preferencesReady ? <p role="status" className="text-sm text-amber-800">
-              {preferencesError || 'Carregando preferências da análise…'}
+            {!preferencesReady || !!cardError ? <p role="status" className="text-sm text-amber-800">
+              {cardError || preferencesError || 'Carregando preferências da análise…'}
               {preferencesError && <button onClick={fetchAnalysisPreferences} className="underline ml-2">Tentar novamente</button>}
             </p> : <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1 pb-4">
               <p className="text-xs text-slate-500">Gastos excluídos não entram nos totais, categorias nem médias. O saldo e as saídas reais continuam considerando todos os gastos.</p>
