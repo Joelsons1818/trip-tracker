@@ -899,21 +899,21 @@ export default function Home() {
           <h2 className="text-lg font-bold text-gray-800 mb-4 px-1">Carteiras</h2>
           <div className="grid grid-cols-2 gap-3 mb-4">
             <button
-              onClick={() => setSelectedWallet(selectedWallet === 'Daniel' ? null : 'Daniel')}
+              onClick={() => { setSelectedWallet(selectedWallet === 'Daniel' ? null : 'Daniel'); setHistoryFilter('Daniel'); }}
               className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 ${selectedWallet === 'Daniel' ? 'bg-indigo-900 border-indigo-700 text-white shadow-md scale-100' : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300 hover:bg-indigo-50/50'}`}
             >
               <Wallet className="w-6 h-6" />
               <span className="font-bold">Wise Daniel</span>
             </button>
             <button
-              onClick={() => setSelectedWallet(selectedWallet === 'Marília' ? null : 'Marília')}
+              onClick={() => { setSelectedWallet(selectedWallet === 'Marília' ? null : 'Marília'); setHistoryFilter('Marília'); }}
               className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 ${selectedWallet === 'Marília' ? 'bg-rose-100 border-rose-300 text-rose-800 shadow-md scale-100' : 'bg-white border-gray-200 text-gray-600 hover:border-rose-300 hover:bg-rose-50/50'}`}
             >
               <Wallet className="w-6 h-6" />
               <span className="font-bold">Wise Marília</span>
             </button>
             <button
-              onClick={() => setSelectedWallet(selectedWallet === 'BofA' ? null : 'BofA')}
+              onClick={() => { setSelectedWallet(selectedWallet === 'BofA' ? null : 'BofA'); setHistoryFilter('BofA'); }}
               className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 overflow-hidden relative ${selectedWallet === 'BofA' ? 'bg-blue-900 border-red-500 text-white shadow-md scale-100' : 'bg-white border-blue-200 text-blue-800 hover:border-red-300 hover:bg-blue-50/50'}`}
             >
               <span className="absolute top-0 left-0 h-1.5 w-full bg-gradient-to-r from-red-500 via-white to-blue-600"></span>
@@ -932,7 +932,7 @@ export default function Home() {
             {walletSummaries.map(({ wallet, balance: walletBalance }) => (
               <button
                 key={wallet}
-                onClick={() => setSelectedWallet(selectedWallet === wallet ? null : wallet)}
+                onClick={() => { setSelectedWallet(selectedWallet === wallet ? null : wallet); setHistoryFilter(wallet); }}
                 className={`min-w-0 rounded-lg border px-2.5 py-2 text-left transition-all ${selectedWallet === wallet ? 'border-slate-400 bg-white shadow-sm' : 'border-gray-200 bg-white/70 hover:bg-white'}`}
               >
                 <p className="truncate text-[10px] font-bold uppercase tracking-wide text-gray-400">{wallet}</p>
@@ -984,37 +984,37 @@ export default function Home() {
 
         {/* Transactions List */}
         <div>
-          <div className="flex justify-between items-end mb-4 px-1">
+          <div className="flex flex-col gap-3 mb-4 px-1">
             <h2 className="text-lg font-bold text-gray-800">Histórico</h2>
-            <div className="flex flex-col items-end gap-1.5">
-              <div className="flex flex-wrap justify-end bg-gray-200/50 p-1 rounded-lg">
+            <div className="flex w-full flex-col gap-1.5">
+              <div className="grid grid-cols-5 gap-0.5 bg-gray-200/50 p-1 rounded-lg">
                 <button
                   onClick={() => setHistoryFilter('Total')}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Total' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  className={`min-w-0 whitespace-nowrap px-1 py-2 text-xs font-bold rounded-md transition-all ${historyFilter === 'Total' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                 >
                   Total
                 </button>
                 <button
                   onClick={() => setHistoryFilter('Daniel')}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Daniel' ? 'bg-indigo-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  className={`min-w-0 whitespace-nowrap px-1 py-2 text-xs font-bold rounded-md transition-all ${historyFilter === 'Daniel' ? 'bg-indigo-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                 >
                   Daniel
                 </button>
                 <button
                   onClick={() => setHistoryFilter('Marília')}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'Marília' ? 'bg-rose-100 text-rose-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  className={`min-w-0 whitespace-nowrap px-1 py-2 text-xs font-bold rounded-md transition-all ${historyFilter === 'Marília' ? 'bg-rose-100 text-rose-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                 >
                   Marília
                 </button>
                 <button
                   onClick={() => setHistoryFilter('BofA')}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyFilter === 'BofA' ? 'bg-blue-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  className={`min-w-0 whitespace-nowrap px-1 py-2 text-xs font-bold rounded-md transition-all ${historyFilter === 'BofA' ? 'bg-blue-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                 >
                   BofA
                 </button>
-                <button onClick={() => setHistoryFilter('Cartão')} className={`px-2.5 py-1 text-xs font-bold rounded-md ${historyFilter === 'Cartão' ? 'bg-violet-900 text-white' : 'text-gray-500'}`}>Cartão</button>
+                <button onClick={() => setHistoryFilter('Cartão')} className={`min-w-0 whitespace-nowrap px-1 py-2 text-xs font-bold rounded-md ${historyFilter === 'Cartão' ? 'bg-violet-900 text-white' : 'text-gray-500'}`}>Cartão</button>
               </div>
-              <div className="flex flex-wrap justify-end bg-gray-200/50 p-1 rounded-lg">
+              <div className="grid grid-cols-4 gap-0.5 bg-gray-200/50 p-1 rounded-lg">
                 {[
                   { value: 'All', label: 'Tudo' },
                   { value: 'Today', label: 'Hoje' },
@@ -1024,7 +1024,7 @@ export default function Home() {
                   <button
                     key={period.value}
                     onClick={() => setHistoryPeriod(period.value as HistoryPeriod)}
-                    className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${historyPeriod === period.value ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    className={`min-w-0 whitespace-nowrap px-1 py-2 text-xs font-bold rounded-md transition-all ${historyPeriod === period.value ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                   >
                     {period.label}
                   </button>
