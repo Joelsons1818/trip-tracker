@@ -73,16 +73,22 @@ function DateField(props: InputHTMLAttributes<HTMLInputElement>) {
     props.onChange?.({ target: { value } } as React.ChangeEvent<HTMLInputElement>);
     close();
   };
-  return <div className="relative">
-    <input {...props} className={`${props.className || ''} pr-12`} />
+  const open = () => {
+    const parts = selected?.split('-').map(Number);
+    const date = parts ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date();
+    setMonth(new Date(date.getFullYear(), date.getMonth(), 1));
+  };
+  return <div className="flex items-center gap-2">
+    <input {...props} className={`${props.className || ''} min-w-0 flex-1`} />
     <button ref={trigger} type="button" aria-label="Abrir calendário" aria-haspopup="dialog" aria-expanded={!!month}
-      className="absolute right-1 top-1/2 -translate-y-1/2 flex h-11 w-11 items-center justify-center text-slate-500"
-      onClick={() => {
-        const date = selected ? new Date(`${selected}T12:00:00`) : new Date();
-        setMonth(new Date(date.getFullYear(), date.getMonth(), 1));
-      }}><Calendar className="h-5 w-5" /></button>
+      className="relative z-10 flex h-12 w-12 shrink-0 touch-manipulation cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-600"
+      onPointerDown={event => {
+        if (event.pointerType !== 'mouse') { event.preventDefault(); event.stopPropagation(); open(); }
+      }}
+      onClick={event => { event.preventDefault(); event.stopPropagation(); open(); }}><Calendar className="pointer-events-none h-5 w-5" /></button>
     {month && createPortal(<div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 p-4"
-      onClick={event => { event.stopPropagation(); if (event.target === event.currentTarget) close(); }}>
+      onPointerDown={event => { event.stopPropagation(); if (event.target === event.currentTarget) close(); }}
+      onClick={event => event.stopPropagation()}>
       <div ref={dialog} role="dialog" aria-modal="true" aria-label="Selecionar data" className="w-full max-w-sm rounded-3xl bg-white p-4 shadow-xl text-slate-800"
         onKeyDown={event => {
           if (event.key === 'Escape') { event.stopPropagation(); close(); }
