@@ -1,5 +1,6 @@
 'use client';
 
+import { createPortal } from 'react-dom';
 import { useState, useEffect, useCallback, useRef, type InputHTMLAttributes } from 'react';
 import { calculateAverages, cents, getSpendingTransactions, partitionAnalysisExpenses, sumAmounts } from '@/lib/analysis';
 import { belongsToWallet, getCardBalance, getCashBalance, isCardTransaction, type CardCommand } from '@/lib/card';
@@ -58,24 +59,59 @@ const focusFirstInput = (form: HTMLFormElement | null) => {
 };
 
 function DateField(props: InputHTMLAttributes<HTMLInputElement>) {
-  const picker = useRef<HTMLInputElement>(null);
-  const [fallback, setFallback] = useState(false);
-  const iso = usDateToIso(String(props.value || ''))?.slice(0, 10) || '';
+  const trigger = useRef<HTMLButtonElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
+  const [month, setMonth] = useState<Date | null>(null);
+  const selected = usDateToIso(String(props.value || ''))?.slice(0, 10);
+  const close = () => { setMonth(null); trigger.current?.focus(); };
+  useEffect(() => {
+    if (month) dialog.current?.querySelector<HTMLButtonElement>('[aria-pressed="true"], button[data-day]')?.focus();
+  }, [month]);
+  const choose = (day: number) => {
+    if (!month) return;
+    const value = `${String(month.getMonth() + 1).padStart(2, '0')}/${String(day).padStart(2, '0')}/${month.getFullYear()}`;
+    props.onChange?.({ target: { value } } as React.ChangeEvent<HTMLInputElement>);
+    close();
+  };
   return <div className="relative">
     <input {...props} className={`${props.className || ''} pr-12`} />
-    <button type="button" aria-label="Abrir calendário" className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-500" onClick={() => {
-      try {
-        if (picker.current?.showPicker) picker.current.showPicker();
-        else setFallback(true);
-      } catch { setFallback(true); }
-    }}><Calendar className="h-5 w-5" /></button>
-    <input ref={picker} type="date" aria-label="Selecionar data no calendário" tabIndex={fallback ? 0 : -1}
-      className={fallback ? 'mt-2 w-full rounded-xl border p-3' : 'absolute bottom-0 left-0 h-px w-px opacity-0 pointer-events-none'}
-      value={iso} onChange={event => {
-        const value = event.target.value ? formatUSDate(`${event.target.value}T12:00:00.000Z`) : '';
-        props.onChange?.({ target: { value } } as React.ChangeEvent<HTMLInputElement>);
-        setFallback(false);
-      }} />
+    <button ref={trigger} type="button" aria-label="Abrir calendário" aria-haspopup="dialog" aria-expanded={!!month}
+      className="absolute right-1 top-1/2 -translate-y-1/2 flex h-11 w-11 items-center justify-center text-slate-500"
+      onClick={() => {
+        const date = selected ? new Date(`${selected}T12:00:00`) : new Date();
+        setMonth(new Date(date.getFullYear(), date.getMonth(), 1));
+      }}><Calendar className="h-5 w-5" /></button>
+    {month && createPortal(<div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 p-4"
+      onClick={event => { event.stopPropagation(); if (event.target === event.currentTarget) close(); }}>
+      <div ref={dialog} role="dialog" aria-modal="true" aria-label="Selecionar data" className="w-full max-w-sm rounded-3xl bg-white p-4 shadow-xl text-slate-800"
+        onKeyDown={event => {
+          if (event.key === 'Escape') { event.stopPropagation(); close(); }
+          if (event.key === 'Tab') {
+            const buttons = Array.from(dialog.current?.querySelectorAll<HTMLButtonElement>('button') || []);
+            const first = buttons[0], last = buttons[buttons.length - 1];
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+          }
+        }}>
+        <div className="flex items-center justify-between mb-3">
+          <button type="button" aria-label="Mês anterior" className="h-11 w-11 rounded-xl hover:bg-slate-100" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>‹</button>
+          <p aria-live="polite" className="font-bold">{month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
+          <button type="button" aria-label="Próximo mês" className="h-11 w-11 rounded-xl hover:bg-slate-100" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}>›</button>
+        </div>
+        <div className="grid grid-cols-7 text-center text-xs text-slate-500">{['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(day => <span key={day} className="py-2">{day}</span>)}</div>
+        <div className="grid grid-cols-7 gap-1">
+          {Array.from({ length: month.getDay() }, (_, index) => <span key={`blank-${index}`} />)}
+          {Array.from({ length: new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate() }, (_, index) => {
+            const day = index + 1;
+            const iso = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            return <button key={day} data-day type="button" aria-label={`${String(month.getMonth() + 1).padStart(2, '0')}/${String(day).padStart(2, '0')}/${month.getFullYear()}`}
+              aria-pressed={selected === iso} onClick={() => choose(day)}
+              className={`h-11 rounded-xl text-sm font-semibold ${selected === iso ? 'bg-violet-700 text-white' : 'hover:bg-violet-100'}`}>{day}</button>;
+          })}
+        </div>
+        <button type="button" onClick={close} className="mt-3 w-full rounded-xl bg-slate-100 p-3 font-semibold">Cancelar</button>
+      </div>
+    </div>, document.body)}
   </div>;
 }
 
